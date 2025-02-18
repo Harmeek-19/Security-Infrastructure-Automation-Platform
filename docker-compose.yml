@@ -1,0 +1,16 @@
+services:
+  zap:
+    image: ghcr.io/zaproxy/zaproxy:stable
+    container_name: security_platform_zap
+    command: zap.sh -daemon -host 0.0.0.0 -port 8080 -config api.addrs.addr.name=.* -config api.addrs.addr.regex=true -config api.key=change_me_please
+    ports:
+      - "8080:8080"
+    networks:
+      - security_net
+    volumes:
+      - ./zap/data:/zap/data
+      - ./zap/scripts:/zap/scripts
+
+networks:
+  security_net:
+    driver: bridge

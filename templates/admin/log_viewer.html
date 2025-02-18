@@ -1,0 +1,43 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div class="module">
+    <style>
+        .log-container {
+            margin: 20px 0;
+        }
+        .log-viewer {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .log-title {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .download-link {
+            margin-left: 10px;
+        }
+    </style>
+
+    <h2>System Logs</h2>
+    
+    {% for file_name, content in log_files.items %}
+    <div class="log-container">
+        <div class="log-title">
+            <h3>{{ file_name }}</h3>
+            <a href="{% url 'admin:download-log' file_name %}" class="download-link">Download</a>
+        </div>
+        <div class="log-viewer">
+            {{ content }}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}
