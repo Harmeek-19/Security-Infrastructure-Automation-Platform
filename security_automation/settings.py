@@ -286,4 +286,13 @@ ZAP_SETTINGS = {
     'SPIDER_TIMEOUT': 600,
     'ACTIVE_SCAN_TIMEOUT': 1200
 }
-# Add ZAP logging to the LOGGING configuration
+# Nuclei Settings
+NUCLEI_SETTINGS = {
+    'TEMPLATES_DIR': 'nuclei-templates',
+    'RESULTS_DIR': 'nuclei-results',
+    'DEFAULT_SEVERITY': 'critical,high,medium',
+    'RATE_LIMIT': 150,
+    'TIMEOUT': 300,
+    'GO_PATH': '/usr/local/go/bin',  # Adjust this based on your Go installation
+    'BINARY_PATH': str(Path.home() / "go" / "bin" / "nuclei"),  # Default Go installation path
+}

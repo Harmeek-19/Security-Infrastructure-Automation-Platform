@@ -1,7 +1,7 @@
 asgiref==3.7.2
 attrs==23.2.0
 Babel==2.10.3
-bcc==0.29.1
+
 bcrypt==3.2.2
 blinker==1.7.0
 Brlapi==0.8.5
@@ -109,105 +109,4 @@ urllib3>=2.0.7
 
 
 
-
-
-
-
-
-
-from django.db import models
-from django.core.validators import MinValueValidator, MaxValueValidator
-
-class Vulnerability(models.Model):
-    SEVERITY_CHOICES = [
-        ('LOW', 'Low'),
-        ('MEDIUM', 'Medium'),
-        ('HIGH', 'High'),
-        ('CRITICAL', 'Critical'),
-    ]
-
-    SOURCE_CHOICES = [
-        ('internal', 'Internal Scanner'),
-        ('zap', 'OWASP ZAP'),
-        ('manual', 'Manual Entry')
-    ]
-
-    # Basic Information
-    target = models.CharField(max_length=255, db_index=True)
-    name = models.CharField(max_length=255)
-    description = models.TextField()
-    severity = models.CharField(max_length=10, choices=SEVERITY_CHOICES, db_index=True)
-    vuln_type = models.CharField(max_length=50, db_index=True)
-    
-    # Evidence and Details
-    evidence = models.TextField()
-    solution = models.TextField(blank=True)
-    references = models.JSONField(default=list)
-    
-    # Source and Confidence
-    source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default='internal')
-    confidence = models.CharField(max_length=50, default='medium')
-    
-    # Status and Tracking
-    discovery_date = models.DateTimeField(auto_now_add=True)
-    is_fixed = models.BooleanField(default=False, db_index=True)
-    fix_date = models.DateTimeField(null=True, blank=True)
-    notes = models.TextField(blank=True)
-    
-    # Additional Metadata
-    cwe = models.CharField(max_length=50, blank=True)
-    cvss_score = models.FloatField(
-        null=True, 
-        blank=True,
-        validators=[MinValueValidator(0.0), MaxValueValidator(10.0)]
-    )
-    metadata = models.JSONField(default=dict)
-
-    class Meta:
-        ordering = ['-discovery_date']
-        verbose_name = 'Vulnerability'
-        verbose_name_plural = 'Vulnerabilities'
-        indexes = [
-            models.Index(fields=['target']),
-            models.Index(fields=['severity']),
-            models.Index(fields=['vuln_type']),
-            models.Index(fields=['source']),
-            models.Index(fields=['is_fixed']),
-            models.Index(fields=['discovery_date']),
-        ]
-
-    def __str__(self):
-        return f"{self.target} - {self.name} ({self.severity})"
-
-    def save(self, *args, **kwargs):
-        # Ensure severity is uppercase
-        if self.severity:
-            self.severity = self.severity.upper()
-        
-        # Set fix_date when vulnerability is marked as fixed
-        if self.is_fixed and not self.fix_date:
-            from django.utils import timezone
-            self.fix_date = timezone.now()
-            
-        super().save(*args, **kwargs)
-
-    @property
-    def age_in_days(self):
-        from django.utils import timezone
-        return (timezone.now() - self.discovery_date).days
-
-    @property
-    def risk_score(self):
-        """Calculate risk score based on CVSS and age"""
-        base_score = self.cvss_score if self.cvss_score else {
-            'CRITICAL': 9.0,
-            'HIGH': 7.0,
-            'MEDIUM': 5.0,
-            'LOW': 3.0
-        }.get(self.severity, 1.0)
-        
-        # Age factor: 1.0 - 2.0 based on age (caps at 90 days)
-        age_factor = min(1 + (self.age_in_days / 90), 2.0)
-        
-        return base_score * age_factor
 
