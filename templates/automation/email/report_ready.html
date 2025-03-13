@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Security Reports Ready</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 20px;
+        }
+        .header {
+            background-color: #d4edda;
+            color: #155724;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .footer {
+            margin-top: 30px;
+            font-size: 12px;
+            color: #777;
+            text-align: center;
+        }
+        .summary {
+            background-color: #f9f9f9;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .button {
+            display: inline-block;
+            padding: 10px 15px;
+            background-color: #007bff;
+            color: white !important; /* Force white text color */
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 10px 5px;
+            text-align: center;
+            font-weight: bold;
+        }
+        h2, h3 {
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>Security Reports Ready</h2>
+        </div>
+        
+        <p>Hello,</p>
+        
+        <p>We're pleased to inform you that the security reports for your scan are now available:</p>
+        
+        <div class="summary">
+            <p><strong>Workflow:</strong> {{ workflow.name }}</p>
+            <p><strong>Target:</strong> {{ workflow.target }}</p>
+            <p><strong>Completed at:</strong> {{ workflow.end_time }}</p>
+        </div>
+        
+        <p>You can access your reports in the following formats:</p>
+        
+        <div style="text-align: center; margin: 20px 0;">
+            {% if html_report_url %}
+            <a href="{{ app_url }}/reporting/view/{{ report_ids.html }}/" class="button">View HTML Report</a>
+            {% endif %}
+            
+            {% if pdf_report_url %}
+            <a href="{{ app_url }}/reporting/download/{{ report_ids.pdf }}/" class="button">Download PDF Report</a>
+            {% endif %}
+        </div>
+        
+        <p>You can view the detailed report at:</p>
+        <p style="text-align: center;">
+            <a href="{{ app_url }}/automation/api/workflows/{{ workflow.id }}/" class="button">View Scan Details</a>
+        </p>
+        
+        <div class="footer">
+            <p>This is an automated notification from your Security Automation Platform.</p>
+            <p>If you have any questions, please contact your system administrator.</p>
+        </div>
+    </div>
+</body>
+</html>

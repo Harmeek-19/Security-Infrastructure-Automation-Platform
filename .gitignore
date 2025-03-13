@@ -1,32 +1,44 @@
-# Python
+# Virtual environment
+venv/
+env/
+
+# Python bytecode and cache
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-venv/
-ENV/
-env/
-*.env
 
-# Django
+# Django migrations cache
+**/migrations/__pycache__/
+**/migrations/*.pyc
+
+# Logs and debug output
+logs/
 *.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-media/
+debug_logs/
+d_log.txt
 
-# IDE
-.idea/
-.vscode/
+# Database files
+db.sqlite3
+
+# Output and results files
+all_code_output.txt
+results.txt
+test_output.json
+
+# Docker and shell scripts
+
+get-docker.sh
+run_django.sh
+
+# Nuclei scan results and security scans
+vulnerability/debug_logs/
+vulnerability/nuclei-results/
+
+# IDE and system files
 *.swp
 *.swo
-
-# OS
+.vscode/
+.idea/
 .DS_Store
-Thumbs.db
 
-# Project specific
-*.tmp
-*.bak
-*.log
+# Other temp files
+touch

@@ -7,7 +7,19 @@ from reconnaissance.models import Subdomain, PortScan
 from vulnerability.models import Vulnerability
 
 class ReportGenerator:
-    def generate_report(self, report_type: str, target: str) -> Report:
+    def generate_report(self, report_type: str, target: str, output_format: str = 'json', scan_results: dict = None) -> Report:
+        """
+        Generate a security report
+        
+        Args:
+            report_type: Type of report ('basic', 'detailed', 'executive')
+            target: Target hostname/domain
+            output_format: Format to generate (currently only 'json' is supported)
+            scan_results: Optional dictionary containing scan results to include
+            
+        Returns:
+            Report: The generated report object
+        """
         # Clean target string
         target = target.strip()
         
@@ -16,20 +28,20 @@ class ReportGenerator:
         
         # Generate report content based on type
         if report_type == 'detailed':
-            content = self.generate_detailed_report(target)
+            content = self.generate_detailed_report(target, scan_results)
         elif report_type == 'executive':
-            content = self.generate_executive_report(target)
+            content = self.generate_executive_report(target, scan_results)
         else:
-            content = self.generate_basic_report(target)
+            content = self.generate_basic_report(target, scan_results)
         
-        # Properly serialize content to JSON string
+        # Properly serialize content to JSON string (all formats are currently JSON)
         json_content = json.dumps(content, cls=DjangoJSONEncoder)
         
         # Create and save the report
         report = Report.objects.create(
             title=f"{report_type.capitalize()} Security Report - {target}",
             content=json_content,
-            report_type=report_type
+            report_type=f"{report_type}_{output_format}"
         )
         
         return report
@@ -75,12 +87,20 @@ class ReportGenerator:
             'metadata': dict(vuln.metadata) if vuln.metadata else {}
         }
     
-    def generate_basic_report(self, target: str) -> dict:
+    def generate_basic_report(self, target: str, scan_results: dict = None) -> dict:
         """Generate a basic security report"""
         subdomains = Subdomain.objects.filter(domain=target)
         port_scans = PortScan.objects.filter(host=target)
         vulnerabilities = Vulnerability.objects.filter(target=target, is_fixed=False)
         open_ports = self._get_open_ports(target)
+
+        # Use provided scan_results if available
+        if scan_results:
+            # You can integrate the scan_results into your report here
+            # Example: Extract vulnerabilities from the scan_results
+            if 'vulnerabilities' in scan_results:
+                # Process the vulnerabilities from scan_results
+                pass
 
         return {
             'target': target,
@@ -102,9 +122,9 @@ class ReportGenerator:
             'vulnerabilities': [self._serialize_vulnerability(vuln) for vuln in vulnerabilities]
         }
 
-    def generate_detailed_report(self, target: str) -> dict:
+    def generate_detailed_report(self, target: str, scan_results: dict = None) -> dict:
         """Generate a detailed security report"""
-        basic_report = self.generate_basic_report(target)
+        basic_report = self.generate_basic_report(target, scan_results)
         vulnerabilities = Vulnerability.objects.filter(target=target, is_fixed=False)
         
         # Enhanced port analysis
@@ -118,13 +138,16 @@ class ReportGenerator:
                 'low_risk_ports': port_risks['low_risk']
             },
             'vulnerability_severity': {
+                'critical': vulnerabilities.filter(severity='CRITICAL').count(),
                 'high': vulnerabilities.filter(severity='HIGH').count(),
                 'medium': vulnerabilities.filter(severity='MEDIUM').count(),
                 'low': vulnerabilities.filter(severity='LOW').count()
             },
             'vulnerability_sources': {
                 'internal': vulnerabilities.filter(source='internal').count(),
-                'zap': vulnerabilities.filter(source='zap').count()
+                'zap': vulnerabilities.filter(source='zap').count(),
+                'nuclei': vulnerabilities.filter(source='nuclei').count(),
+                'multiple': vulnerabilities.exclude(source__in=['internal', 'zap', 'nuclei']).count()
             }
         }
         
@@ -152,25 +175,73 @@ class ReportGenerator:
                 
         return port_risks
 
-    def generate_executive_report(self, target: str) -> dict:
+    def generate_executive_report(self, target: str, scan_results: dict = None) -> dict:
         """Generate an executive summary report"""
-        basic_report = self.generate_basic_report(target)
+        basic_report = self.generate_basic_report(target, scan_results)
         vulnerabilities = Vulnerability.objects.filter(target=target, is_fixed=False)
         high_vulns = vulnerabilities.filter(severity='HIGH')
+        critical_vulns = vulnerabilities.filter(severity='CRITICAL')
         
         # Enhanced metrics
         risk_metrics = {
+            'critical_severity_vulns': critical_vulns.count(),
             'high_severity_vulns': high_vulns.count(),
             'open_ports': len(basic_report['open_ports']),
             'total_vulnerabilities': vulnerabilities.count(),
             'high_risk_ports': len(self._analyze_port_risks(basic_report['open_ports'])['high_risk'])
         }
         
+        # Combine critical and high vulnerabilities in findings
+        top_findings = []
+        for vuln in critical_vulns:
+            top_findings.append(self._serialize_vulnerability(vuln))
+        if len(top_findings) < 5:  # Limit to 5 findings total
+            for vuln in high_vulns[:5-len(top_findings)]:
+                top_findings.append(self._serialize_vulnerability(vuln))
+        
         executive_summary = {
             'risk_level': self._calculate_risk_level(risk_metrics),
-            'critical_findings': [self._serialize_vulnerability(vuln) for vuln in high_vulns],
+            'critical_findings': top_findings,
             'risk_metrics': risk_metrics,
             'recommendations': self._generate_recommendations(risk_metrics, basic_report)
         }
         
         return {**basic_report, 'executive_summary': executive_summary}
+    
+    def _calculate_risk_level(self, metrics):
+        """Calculate overall risk level based on metrics"""
+        if metrics['critical_severity_vulns'] > 0:
+            return 'CRITICAL'
+        elif metrics['high_severity_vulns'] > 2:
+            return 'HIGH'
+        elif metrics['high_severity_vulns'] > 0 or metrics['high_risk_ports'] > 0:
+            return 'MEDIUM'
+        else:
+            return 'LOW'
+    
+    def _generate_recommendations(self, metrics, basic_report):
+        """Generate security recommendations based on findings"""
+        recommendations = []
+        
+        # Add recommendations based on findings
+        if metrics['critical_severity_vulns'] > 0 or metrics['high_severity_vulns'] > 0:
+            recommendations.append({
+                'title': 'Address High and Critical Vulnerabilities',
+                'description': 'Fix identified critical and high vulnerabilities as a priority.'
+            })
+            
+        if metrics['high_risk_ports'] > 0:
+            recommendations.append({
+                'title': 'Secure High Risk Ports',
+                'description': 'Restrict access to high risk services or replace with more secure alternatives.'
+            })
+            
+        # Always add general recommendations
+        recommendations.append({
+            'title': 'Regular Security Testing',
+            'description': 'Perform regular security assessments to identify new vulnerabilities.'
+        })
+        
+        return recommendations
+    
+    

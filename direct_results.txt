@@ -1,1 +1,0 @@
-[idea-folder-exposure] [http] [info] http://testphp.vulnweb.com/.idea/workspace.xml

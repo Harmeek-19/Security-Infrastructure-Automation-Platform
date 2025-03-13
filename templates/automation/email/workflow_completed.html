@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Workflow Completed Notification</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 20px;
+        }
+        .header {
+            background-color: #d4edda;
+            color: #155724;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .footer {
+            margin-top: 30px;
+            font-size: 12px;
+            color: #777;
+            text-align: center;
+        }
+        .summary {
+            background-color: #f9f9f9;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .task-list {
+            list-style: none;
+            padding-left: 0;
+        }
+        .task-list li {
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .task-list li:last-child {
+            border-bottom: none;
+        }
+        .success {
+            color: #28a745;
+        }
+        .warning {
+            color: #ffc107;
+        }
+        .danger {
+            color: #dc3545;
+        }
+        .button {
+            display: inline-block;
+            padding: 10px 15px;
+            background-color: #007bff;
+            color: white !important;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 10px 5px;
+            text-align: center;
+            font-weight: bold;
+        }
+        .button-primary {
+            background-color: #28a745;
+        }
+        .button-secondary {
+            background-color: #6c757d;
+        }
+        h2, h3 {
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>Workflow Completed Successfully</h2>
+        </div>
+        
+        <p>Hello,</p>
+        
+        <p>Your security automation workflow has been completed:</p>
+        
+        <div class="summary">
+            <p><strong>Workflow:</strong> {{ workflow.name }}</p>
+            <p><strong>Target:</strong> {{ workflow.target }}</p>
+            <p><strong>Started at:</strong> {{ workflow.start_time }}</p>
+            <p><strong>Completed at:</strong> {{ workflow.end_time }}</p>
+            <p><strong>Duration:</strong> {{ workflow.duration }} seconds</p>
+        </div>
+        
+        <h3>Findings Summary:</h3>
+        <ul>
+            <li><span class="danger"><strong>Critical vulnerabilities:</strong></span> {{ summary.critical }}</li>
+            <li><span class="warning"><strong>High vulnerabilities:</strong></span> {{ summary.high }}</li>
+            <li><span class="warning"><strong>Medium vulnerabilities:</strong></span> {{ summary.medium }}</li>
+            <li><strong>Low vulnerabilities:</strong> {{ summary.low }}</li>
+            <li><strong>Total findings:</strong> {{ summary.total }}</li>
+        </ul>
+        
+        <h3>Tasks Executed:</h3>
+        <ul class="task-list">
+            {% for task in tasks %}
+            <li>
+                <strong>{{ task.name }}</strong> - 
+                {% if task.status == 'completed' %}
+                <span class="success">Completed</span>
+                {% elif task.status == 'failed' %}
+                <span class="danger">Failed</span>
+                {% else %}
+                <span>{{ task.status }}</span>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+        
+        <div style="text-align: center; margin-top: 30px;">
+            {% if comprehensive_report_url %}
+            <a href="{{ comprehensive_report_url }}" class="button button-primary">View Comprehensive Report</a>
+            {% endif %}
+            
+            {% if pdf_url %}
+            <a href="{{ pdf_url }}" class="button">Download PDF Report</a>
+            {% endif %}
+        </div>
+        
+        <div class="footer">
+            <p>This is an automated notification from your Security Automation Platform.</p>
+            <p>If you have any questions, please contact your system administrator.</p>
+        </div>
+    </div>
+</body>
+</html>

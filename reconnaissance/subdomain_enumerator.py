@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 from typing import List, Dict
 import requests
+import re
 
 class SubdomainEnumerator:
     def __init__(self):
@@ -20,8 +21,15 @@ class SubdomainEnumerator:
             'support', 'api', 'dev', 'staging', 'app', 'portal', 'beta'
         ]
 
-    def enumerate_subdomains(self, domain: str) -> List[Dict]:
+    def enumerate_subdomains(self, target: str) -> List[Dict]:
         """Main subdomain enumeration method combining multiple techniques"""
+        # Clean target - remove protocol and path to get just the domain
+        domain = self._extract_domain(target)
+        if not domain:
+            self.logger.error(f"Invalid domain provided: {target}")
+            return []
+            
+        self.logger.info(f"Starting subdomain enumeration for domain: {domain}")
         discovered_subdomains = set()
         results = []
 
@@ -52,6 +60,27 @@ class SubdomainEnumerator:
                     self.logger.error(f"Error validating {subdomain}: {str(e)}")
 
         return results
+
+    def _extract_domain(self, url: str) -> str:
+        """Extract root domain from a URL or domain string"""
+        # Remove protocol if present
+        if '://' in url:
+            url = url.split('://', 1)[1]
+            
+        # Remove path, query params, and fragment
+        url = url.split('/', 1)[0]
+        url = url.split('?', 1)[0]
+        url = url.split('#', 1)[0]
+        
+        # Remove port if present
+        url = url.split(':', 1)[0]
+        
+        # Validate domain format
+        domain_pattern = r'^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$'
+        if re.match(domain_pattern, url):
+            return url
+        
+        return None
 
     def _dns_enumeration(self, domain: str) -> set:
         """Enumerate subdomains using DNS queries"""

@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Comprehensive Security Report - {{ workflow.target }}</title>
+    <style>
+        /* Base styling */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f8f9fa;
+            padding: 20px;
+        }
+        
+        .report-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .report-header {
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+            border-bottom: 3px solid #f0f0f0;
+        }
+        
+        .report-title {
+            font-size: 2rem;
+            color: #1a1a1a;
+            margin-bottom: 0.5rem;
+        }
+        
+        .report-meta {
+            color: #666;
+            font-size: 0.9rem;
+        }
+        
+        .section {
+            margin-bottom: 3rem;
+        }
+        
+        .section-title {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #f0f0f0;
+        }
+        
+        .task-section {
+            background-color: #f9f9f9;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            border-left: 5px solid #007bff;
+        }
+        
+        .task-section.completed {
+            border-left-color: #28a745;
+        }
+        
+        .task-section.failed {
+            border-left-color: #dc3545;
+        }
+        
+        .task-section.skipped {
+            border-left-color: #6c757d;
+        }
+        
+        .task-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        
+        .task-title {
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+        
+        .task-status {
+            padding: 0.3rem 0.6rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        
+        .status-completed {
+            background-color: #28a745;
+            color: white;
+        }
+        
+        .status-failed {
+            background-color: #dc3545;
+            color: white;
+        }
+        
+        .status-skipped {
+            background-color: #6c757d;
+            color: white;
+        }
+        
+        .status-pending {
+            background-color: #ffc107;
+            color: #333;
+        }
+        
+        .task-content {
+            margin-top: 1rem;
+        }
+        
+        .result-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 1rem;
+        }
+        
+        .result-table th {
+            background-color: #f5f5f5;
+            text-align: left;
+            padding: 0.5rem;
+            border-bottom: 2px solid #ddd;
+        }
+        
+        .result-table td {
+            padding: 0.5rem;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 0.3rem 0.6rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        
+        .badge-critical {
+            background-color: #dc3545;
+            color: white;
+        }
+        
+        .badge-high {
+            background-color: #fd7e14;
+            color: white;
+        }
+        
+        .badge-medium {
+            background-color: #ffc107;
+            color: #333;
+        }
+        
+        .badge-low {
+            background-color: #28a745;
+            color: white;
+        }
+        
+        .badge-info {
+            background-color: #17a2b8;
+            color: white;
+        }
+        
+        .tab-container {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 2rem;
+        }
+        
+        .tab-header {
+            display: flex;
+            background-color: #f5f5f5;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .tab-btn {
+            padding: 0.75rem 1.25rem;
+            border: none;
+            background-color: transparent;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        
+        .tab-btn.active {
+            background-color: white;
+            border-bottom: 3px solid #007bff;
+        }
+        
+        .tab-content {
+            display: none;
+            padding: 1.25rem;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        /* Evidence and solution cards */
+        .evidence-card {
+            background-color: #f8f9fa;
+            border: 1px solid #eee;
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 4px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            font-size: 0.9rem;
+            overflow: auto;
+        }
+        
+        .solution-card {
+            background-color: #f0f7ff;
+            border-left: 4px solid #007bff;
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 0 4px 4px 0;
+        }
+        
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        .summary-box {
+            background-color: white;
+            padding: 1rem;
+            border-radius: 6px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        
+        .summary-box .number {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+        
+        .summary-box .label {
+            color: #666;
+            font-size: 0.9rem;
+        }
+        
+        /* Actions */
+        .actions {
+            margin-top: 2rem;
+        }
+        
+        .btn {
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            background-color: #f0f0f0;
+            color: #333;
+            text-decoration: none;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+            font-size: 0.9rem;
+            margin-right: 0.5rem;
+        }
+        
+        .btn-primary {
+            background-color: #007bff;
+            color: white;
+        }
+        
+        .btn-success {
+            background-color: #28a745;
+            color: white;
+        }
+        
+        @media print {
+            body {
+                padding: 0;
+                background-color: white;
+            }
+            
+            .report-container {
+                box-shadow: none;
+                padding: 0;
+                max-width: 100%;
+            }
+            
+            .actions, .no-print {
+                display: none;
+            }
+            
+            .section {
+                page-break-inside: avoid;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="report-container">
+        <div class="report-header">
+            <h1 class="report-title">Comprehensive Security Report - {{ workflow.target }}</h1>
+            <div class="report-meta">
+                <span>Scan started: {{ workflow.start_time }}</span> | 
+                <span>Scan completed: {{ workflow.end_time }}</span> | 
+                <span>Duration: {{ workflow.duration }} seconds</span>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2 class="section-title">Executive Summary</h2>
+            
+            <div class="summary-grid">
+                {% if report_data.detailed_info.vulnerability_severity %}
+                <div class="summary-box">
+                    <div class="number critical">{{ report_data.detailed_info.vulnerability_severity.critical }}</div>
+                    <div class="label">Critical Vulnerabilities</div>
+                </div>
+                <div class="summary-box">
+                    <div class="number high">{{ report_data.detailed_info.vulnerability_severity.high }}</div>
+                    <div class="label">High Vulnerabilities</div>
+                </div>
+                <div class="summary-box">
+                    <div class="number medium">{{ report_data.detailed_info.vulnerability_severity.medium }}</div>
+                    <div class="label">Medium Vulnerabilities</div>
+                </div>
+                <div class="summary-box">
+                    <div class="number low">{{ report_data.detailed_info.vulnerability_severity.low }}</div>
+                    <div class="label">Low Vulnerabilities</div>
+                </div>
+                {% endif %}
+                <div class="summary-box">
+                    <div class="number">{{ report_data.summary.total_vulnerabilities }}</div>
+                    <div class="label">Total Vulnerabilities</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- All scan tasks with their results -->
+        <div class="section">
+            <h2 class="section-title">Scan Details</h2>
+            
+            {% for task_result in task_results %}
+            <div class="task-section {{ task_result.status }}">
+                <div class="task-header">
+                    <h3 class="task-title">{{ task_result.name }}</h3>
+                    <span class="task-status status-{{ task_result.status }}">{{ task_result.status }}</span>
+                </div>
+                
+                {% if task_result.duration %}
+                <div class="task-meta">
+                    <small>Duration: {{ task_result.duration }} seconds</small>
+                </div>
+                {% endif %}
+                
+                <div class="task-content">
+                    {% if task_result.type == 'subdomain_enumeration' and task_result.status == 'completed' %}
+                        <h4>Discovered Subdomains</h4>
+                        {% if task_result.result_data.subdomains %}
+                            <table class="result-table">
+                                <thead>
+                                    <tr>
+                                        <th>Subdomain</th>
+                                        <th>IP Address</th>
+                                        {% if task_result.result_data.subdomains.0.is_http is not None %}
+                                        <th>HTTP Status</th>
+                                        {% endif %}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for subdomain in task_result.result_data.subdomains %}
+                                    <tr>
+                                        <td>{{ subdomain.subdomain }}</td>
+                                        <td>{{ subdomain.ip_address }}</td>
+                                        {% if subdomain.is_http is not None %}
+                                        <td>{% if subdomain.is_http %}{{ subdomain.http_status }}{% else %}N/A{% endif %}</td>
+                                        {% endif %}
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        {% else %}
+                            <p>No subdomains found.</p>
+                        {% endif %}
+                        
+                    {% elif task_result.type == 'port_scanning' and task_result.status == 'completed' %}
+                        <h4>Port Scan Results</h4>
+                        {% if task_result.result_data.results and task_result.result_data.results.0.ports %}
+                            <table class="result-table">
+                                <thead>
+                                    <tr>
+                                        <th>Port</th>
+                                        <th>State</th>
+                                        <th>Service</th>
+                                        <th>Version</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for host in task_result.result_data.results %}
+                                        {% for port in host.ports %}
+                                        <tr>
+                                            <td>{{ port.port }}</td>
+                                            <td>{{ port.state }}</td>
+                                            <td>{{ port.service }}</td>
+                                            <td>{{ port.version }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        {% else %}
+                            <p>No open ports found.</p>
+                        {% endif %}
+                        
+                    {% elif task_result.type == 'service_identification' and task_result.status == 'completed' %}
+                        <h4>Service Identification Results</h4>
+                        {% if task_result.result_data.services %}
+                            <table class="result-table">
+                                <thead>
+                                    <tr>
+                                        <th>Port</th>
+                                        <th>Service</th>
+                                        <th>Product</th>
+                                        <th>Version</th>
+                                        <th>Risk Level</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for service in task_result.result_data.services %}
+                                    <tr>
+                                        <td>{{ service.port }}</td>
+                                        <td>{{ service.service.name }}</td>
+                                        <td>{{ service.service.product }}</td>
+                                        <td>{{ service.service.version }}</td>
+                                        <td>{{ service.risk_level }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        {% else %}
+                            <p>No services identified.</p>
+                        {% endif %}
+                        
+                    {% elif task_result.type == 'vulnerability_scanning' and task_result.status == 'completed' %}
+                        <div class="tab-container">
+                            <div class="tab-header">
+                                <button class="tab-btn active" onclick="openTab(event, 'vuln-summary')">Summary</button>
+                                <button class="tab-btn" onclick="openTab(event, 'vuln-details')">Vulnerabilities</button>
+                            </div>
+                            <div id="vuln-summary" class="tab-content active">
+                                <h4>Vulnerability Scan Summary</h4>
+                                <div class="summary-grid">
+                                    {% for severity, count in task_result.result_data.summary.items %}
+                                        {% if severity != 'total' %}
+                                        <div class="summary-box">
+                                            <div class="number {{ severity }}">{{ count }}</div>
+                                            <div class="label">{{ severity|title }} Vulnerabilities</div>
+                                        </div>
+                                        {% endif %}
+                                    {% endfor %}
+                                    <div class="summary-box">
+                                        <div class="number">{{ task_result.result_data.summary.total }}</div>
+                                        <div class="label">Total Vulnerabilities</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="vuln-details" class="tab-content">
+                                <h4>Vulnerability Details</h4>
+                                {% if task_result.result_data.vulnerabilities %}
+                                    <table class="result-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Name</th>
+                                                <th>Severity</th>
+                                                <th>Source</th>
+                                                <th>Type</th>
+                                                <th>CVSS</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for vuln in task_result.result_data.vulnerabilities %}
+                                            <tr>
+                                                <td>{{ vuln.name }}</td>
+                                                <td>
+                                                    <span class="badge badge-{{ vuln.severity|lower }}">{{ vuln.severity }}</span>
+                                                </td>
+                                                <td>{{ vuln.source }}</td>
+                                                <td>{{ vuln.vuln_type }}</td>
+                                                <td>{{ vuln.cvss_score|default:"N/A" }}</td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                {% else %}
+                                    <p>No vulnerabilities found.</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                        
+                    {% elif task_result.type == 'network_mapping' and task_result.status == 'completed' %}
+                        <h4>Network Mapping Results</h4>
+                        {% if task_result.result_data.nodes %}
+                            <p>Network map created with {{ task_result.result_data.nodes|length }} nodes and {{ task_result.result_data.links|length }} connections.</p>
+                        {% else %}
+                            <p>No network mapping data available.</p>
+                        {% endif %}
+                        
+                    {% elif task_result.type == 'report_generation' and task_result.status == 'completed' %}
+                        <h4>Generated Reports</h4>
+                        {% if task_result.result_data.report_ids %}
+                            <ul>
+                                {% for format, report_id in task_result.result_data.report_ids.items %}
+                                <li>{{ format|upper }} Report: <a href="/reporting/download/{{ report_id }}/" target="_blank">Download</a></li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <p>No reports generated.</p>
+                        {% endif %}
+                        
+                    {% elif task_result.status == 'failed' %}
+                        <div class="evidence-card">
+                            Error: {{ task_result.result_data.error }}
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        
+        <!-- Vulnerabilities Section -->
+        {% if report_data.vulnerabilities %}
+        <div class="section">
+            <h2 class="section-title">Vulnerabilities</h2>
+            
+            <table class="result-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Severity</th>
+                        <th>Source</th>
+                        <th>Type</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for vuln in report_data.vulnerabilities %}
+                    <tr>
+                        <td>{{ vuln.name }}</td>
+                        <td>
+                            <span class="badge badge-{{ vuln.severity|lower }}">{{ vuln.severity }}</span>
+                        </td>
+                        <td>{{ vuln.source }}</td>
+                        <td>{{ vuln.vuln_type }}</td>
+                        <td>
+                            <button onclick="toggleVulnDetails('vuln-{{ vuln.id }}')">Details</button>
+                        </td>
+                    </tr>
+                    <tr id="vuln-{{ vuln.id }}" style="display: none;">
+                        <td colspan="5">
+                            <div class="vuln-details">
+                                <h3>Description</h3>
+                                <p>{{ vuln.description }}</p>
+                                
+                                {% if vuln.evidence %}
+                                <h3>Evidence</h3>
+                                <div class="evidence-card">{{ vuln.evidence }}</div>
+                                {% endif %}
+                                
+                                {% if vuln.solution %}
+                                <h3>Solution</h3>
+                                <div class="solution-card">{{ vuln.solution }}</div>
+                                {% endif %}
+                                
+                                <div class="vuln-meta">
+                                    <p><strong>CVSS Score:</strong> {{ vuln.cvss_score|default:"N/A" }}</p>
+                                    <p><strong>Confidence:</strong> {{ vuln.confidence }}</p>
+                                    <p><strong>Discovery Date:</strong> {{ vuln.discovery_date }}</p>
+                                    
+                                    {% if vuln.cwe %}
+                                    <p><strong>CWE:</strong> {{ vuln.cwe }}</p>
+                                    {% endif %}
+                                    
+                                    {% if vuln.references %}
+                                    <h3>References</h3>
+                                    <ul>
+                                        {% for ref in vuln.references %}
+                                        <li><a href="{{ ref }}" target="_blank">{{ ref }}</a></li>
+                                        {% endfor %}
+                                    </ul>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+        
+        <div class="actions no-print">
+            <h2 class="section-title">Actions</h2>
+            <button onclick="window.print()" class="btn">Print Report</button>
+            <a href="/reporting/download/{{ report.id }}/pdf/" class="btn btn-primary">Download PDF Report</a>
+            <a href="/reporting/download/{{ report.id }}/?download=true" class="btn">Download JSON Report</a>
+        </div>
+    </div>
+
+    <script>
+        function toggleVulnDetails(id) {
+            const row = document.getElementById(id);
+            row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
+        }
+        
+        function openTab(evt, tabName) {
+            // Hide all tab content
+            const tabContent = document.getElementsByClassName("tab-content");
+            for (let i = 0; i < tabContent.length; i++) {
+                tabContent[i].classList.remove("active");
+            }
+            
+            // Remove "active" class from all tab buttons
+            const tabButtons = document.getElementsByClassName("tab-btn");
+            for (let i = 0; i < tabButtons.length; i++) {
+                tabButtons[i].classList.remove("active");
+            }
+            
+            // Show the specific tab content
+            document.getElementById(tabName).classList.add("active");
+            
+            // Add "active" class to the button that opened the tab
+            evt.currentTarget.classList.add("active");
+        }
+    </script>
+</body>
+</html>

@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'network_visualization',
+    'automation',
     'reconnaissance.apps.ReconnaissanceConfig',
     'vulnerability.apps.VulnerabilityConfig',
     'reporting.apps.ReportingConfig',
@@ -65,6 +66,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'automation.middleware.AutomationProcessorMiddleware'
 
 ]
 # OpenVAS Configuration
@@ -296,3 +298,16 @@ NUCLEI_SETTINGS = {
     'GO_PATH': '/usr/local/go/bin',  # Adjust this based on your Go installation
     'BINARY_PATH': str(Path.home() / "go" / "bin" / "nuclei"),  # Default Go installation path
 }
+
+# Email Settings
+# Email Settings
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'  # Changed from example.com to Gmail's SMTP server
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = 'harmeeksingh729@gmail.com' 
+EMAIL_HOST_PASSWORD = 'lyel vzou qbuh fvcl'  # App password or regular password
+DEFAULT_FROM_EMAIL = 'harmeeksingh729@gmail.com'  # Should match EMAIL_HOST_USER
+
+AUTOMATION_AUTOSTART = True  # Automatically start the processor on application startup
+AUTOMATION_PROCESSING_INTERVAL = 60  # Seconds between processing cycles

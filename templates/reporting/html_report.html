@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ report.title }} | Security Report</title>
+    <style>
+        /* Reset and base styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f8f9fa;
+            padding: 20px;
+        }
+        
+        .report-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .report-header {
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+            border-bottom: 3px solid #f0f0f0;
+        }
+        
+        .report-title {
+            font-size: 2rem;
+            color: #1a1a1a;
+            margin-bottom: 0.5rem;
+        }
+        
+        .report-meta {
+            color: #666;
+            font-size: 0.9rem;
+        }
+        
+        .summary-card {
+            background-color: #f9f9f9;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        
+        .summary-title {
+            font-size: 1.4rem;
+            margin-bottom: 1rem;
+            color: #333;
+        }
+        
+        .stat-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        
+        .stat-box {
+            background-color: white;
+            padding: 1rem;
+            border-radius: 6px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        
+        .stat-box .number {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+        
+        .stat-box .label {
+            color: #666;
+            font-size: 0.9rem;
+        }
+        
+        .critical { color: #dc3545; }
+        .high { color: #fd7e14; }
+        .medium { color: #ffc107; }
+        .low { color: #28a745; }
+        
+        .section {
+            margin-bottom: 3rem;
+        }
+        
+        .section-title {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #f0f0f0;
+        }
+        
+        .vuln-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 2rem;
+        }
+        
+        .vuln-table th {
+            background-color: #f5f5f5;
+            text-align: left;
+            padding: 0.75rem 1rem;
+            border-bottom: 2px solid #ddd;
+        }
+        
+        .vuln-table td {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .vuln-table tr:hover {
+            background-color: #f9f9f9;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 0.3rem 0.6rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        
+        .badge-critical {
+            background-color: #dc3545;
+            color: white;
+        }
+        
+        .badge-high {
+            background-color: #fd7e14;
+            color: white;
+        }
+        
+        .badge-medium {
+            background-color: #ffc107;
+            color: #333;
+        }
+        
+        .badge-low {
+            background-color: #28a745;
+            color: white;
+        }
+        
+        .badge-info {
+            background-color: #17a2b8;
+            color: white;
+        }
+        
+        .solution-card {
+            background-color: #f0f7ff;
+            border-left: 4px solid #007bff;
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 0 4px 4px 0;
+        }
+        
+        .evidence-card {
+            background-color: #f8f9fa;
+            border: 1px solid #eee;
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 4px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            font-size: 0.9rem;
+            overflow: auto;
+        }
+        
+        .collapsible {
+            background-color: #f1f1f1;
+            color: #444;
+            cursor: pointer;
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            text-align: center;
+            outline: none;
+            font-size: 0.9rem;
+        }
+        
+        .collapsible:hover {
+            background-color: #ddd;
+        }
+        
+        .collapse-content {
+            display: none;
+        }
+        
+        .vuln-details {
+            padding: 1rem;
+            border: 1px solid #eee;
+            border-radius: 4px;
+            margin-top: 0.5rem;
+            background-color: #fafafa;
+        }
+        
+        .vuln-details h3 {
+            margin: 1rem 0 0.5rem 0;
+            font-size: 1.1rem;
+        }
+        
+        .vuln-details p {
+            margin-bottom: 0.5rem;
+        }
+        
+        .vuln-meta {
+            margin-top: 1rem;
+            border-top: 1px solid #eee;
+            padding-top: 1rem;
+            font-size: 0.9rem;
+        }
+        
+        .filters {
+            display: flex;
+            flex-wrap: wrap;
+            margin-bottom: 1.5rem;
+            gap: 0.5rem;
+        }
+        
+        .filter-btn {
+            background-color: #f0f0f0;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .filter-btn:hover, .filter-btn.active {
+            background-color: #007bff;
+            color: white;
+        }
+        
+        .hidden {
+            display: none !important;
+        }
+        
+        @media print {
+            .no-print {
+                display: none;
+            }
+            
+            body {
+                font-size: 12pt;
+                padding: 0;
+                background-color: white;
+            }
+            
+            .report-container {
+                box-shadow: none;
+                padding: 0;
+                max-width: 100%;
+            }
+            
+            .section {
+                page-break-inside: avoid;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .stat-grid {
+                grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            }
+            
+            .vuln-table th:nth-child(3), 
+            .vuln-table td:nth-child(3), 
+            .vuln-table th:nth-child(4), 
+            .vuln-table td:nth-child(4) {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="report-container">
+        <div class="report-header">
+            <h1 class="report-title">{{ report.title }}</h1>
+            <div class="report-meta">
+                <span>Generated on: {{ report_data.scan_date }}</span>
+                {% if report.creation_date %} | <span>Report Date: {{ report.creation_date }}</span>{% endif %}
+            </div>
+        </div>
+        
+        <div class="summary-card">
+            <h2 class="summary-title">Executive Summary</h2>
+            <div class="stat-grid">
+                <div class="stat-box">
+                    <div class="number critical">{{ report_data.detailed_info.vulnerability_severity.critical }}</div>
+                    <div class="label">Critical Vulnerabilities</div>
+                </div>
+                <div class="stat-box">
+                    <div class="number high">{{ report_data.detailed_info.vulnerability_severity.high }}</div>
+                    <div class="label">High Vulnerabilities</div>
+                </div>
+                <div class="stat-box">
+                    <div class="number medium">{{ report_data.detailed_info.vulnerability_severity.medium }}</div>
+                    <div class="label">Medium Vulnerabilities</div>
+                </div>
+                <div class="stat-box">
+                    <div class="number low">{{ report_data.detailed_info.vulnerability_severity.low }}</div>
+                    <div class="label">Low Vulnerabilities</div>
+                </div>
+                <div class="stat-box">
+                    <div class="number">{{ report_data.summary.total_vulnerabilities }}</div>
+                    <div class="label">Total Findings</div>
+                </div>
+            </div>
+            
+            <p><strong>Target:</strong> {{ report_data.target }}</p>
+            
+            {% if report_data.summary.open_ports_count > 0 %}
+            <p><strong>Open Ports:</strong> {{ report_data.summary.open_ports_count }}</p>
+            {% endif %}
+        </div>
+        
+        <div class="section no-print">
+            <h2 class="section-title">Filters</h2>
+            <div class="filters">
+                <button class="filter-btn active" data-filter="all">All</button>
+                <button class="filter-btn" data-filter="critical">Critical</button>
+                <button class="filter-btn" data-filter="high">High</button>
+                <button class="filter-btn" data-filter="medium">Medium</button>
+                <button class="filter-btn" data-filter="low">Low</button>
+                <button class="filter-btn" data-filter="info">Info</button>
+            </div>
+        </div>
+        
+        {% if report_data.vulnerabilities %}
+        <div class="section">
+            <h2 class="section-title">Vulnerabilities</h2>
+            
+            <table class="vuln-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Severity</th>
+                        <th>Source</th>
+                        <th>Type</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for vuln in report_data.vulnerabilities %}
+                    <tr class="vuln-row" data-severity="{{ vuln.severity|lower }}">
+                        <td>{{ vuln.name }}</td>
+                        <td>
+                            <span class="badge badge-{{ vuln.severity|lower }}">{{ vuln.severity }}</span>
+                        </td>
+                        <td>{{ vuln.source }}</td>
+                        <td>{{ vuln.vuln_type }}</td>
+                        <td>
+                            <button class="collapsible" onclick="toggleDetails('details-{{ vuln.id }}')">Details</button>
+                        </td>
+                    </tr>
+                    <tr class="collapse-content" id="details-{{ vuln.id }}">
+                        <td colspan="5">
+                            <div class="vuln-details">
+                                <h3>Description</h3>
+                                <p>{{ vuln.description }}</p>
+                                
+                                {% if vuln.evidence %}
+                                <h3>Evidence</h3>
+                                <div class="evidence-card">{{ vuln.evidence }}</div>
+                                {% endif %}
+                                
+                                {% if vuln.solution %}
+                                <h3>Solution</h3>
+                                <div class="solution-card">{{ vuln.solution }}</div>
+                                {% endif %}
+                                
+                                <div class="vuln-meta">
+                                    <p><strong>CVSS Score:</strong> {{ vuln.cvss_score|default:"N/A" }}</p>
+                                    <p><strong>Confidence:</strong> {{ vuln.confidence }}</p>
+                                    <p><strong>Discovery Date:</strong> {{ vuln.discovery_date }}</p>
+                                    
+                                    {% if vuln.cwe %}
+                                    <p><strong>CWE:</strong> {{ vuln.cwe }}</p>
+                                    {% endif %}
+                                    
+                                    {% if vuln.references %}
+                                    <h3>References</h3>
+                                    <ul>
+                                        {% for ref in vuln.references %}
+                                        <li><a href="{{ ref }}" target="_blank">{{ ref }}</a></li>
+                                        {% endfor %}
+                                    </ul>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+        
+        {% if report_data.open_ports %}
+        <div class="section">
+            <h2 class="section-title">Open Ports</h2>
+            <table class="vuln-table">
+                <thead>
+                    <tr>
+                        <th>Port</th>
+                        <th>Service</th>
+                        <th>Protocol</th>
+                        <th>Banner</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for port in report_data.open_ports %}
+                    <tr>
+                        <td>{{ port.port }}</td>
+                        <td>{{ port.service }}</td>
+                        <td>{{ port.protocol }}</td>
+                        <td>{{ port.banner }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+        
+        <div class="section no-print">
+            <h2 class="section-title">Actions</h2>
+            <button onclick="window.print()" class="filter-btn">Print Report</button>
+            <a href="/reporting/download/{{ report.id }}/" class="filter-btn">Download PDF</a>
+        </div>
+    </div>
+
+    <script>
+        // Toggle collapsible content
+        function toggleDetails(id) {
+            const detailsRow = document.getElementById(id);
+            if (detailsRow.style.display === 'table-row') {
+                detailsRow.style.display = 'none';
+            } else {
+                detailsRow.style.display = 'table-row';
+            }
+        }
+        
+        // Initialize filter functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const filterButtons = document.querySelectorAll('.filter-btn[data-filter]');
+            const vulnRows = document.querySelectorAll('.vuln-row, .collapse-content');
+            
+            filterButtons.forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    // Update active state
+                    filterButtons.forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+                    
+                    const filter = this.getAttribute('data-filter');
+                    
+                    vulnRows.forEach(function(row) {
+                        // Hide all detail rows first
+                        if (row.classList.contains('collapse-content')) {
+                            row.style.display = 'none';
+                            return;
+                        }
+                        
+                        const severity = row.getAttribute('data-severity');
+                        if (filter === 'all' || severity === filter) {
+                            row.style.display = '';
+                        } else {
+                            row.style.display = 'none';
+                        }
+                    });
+                });
+            });
+        });
+    </script>
+</body>
+</html>
