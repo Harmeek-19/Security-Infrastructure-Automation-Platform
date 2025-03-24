@@ -5,9 +5,11 @@ import json
 import socket
 import time
 from datetime import datetime, timedelta
+from typing import Dict, List
 from django.utils import timezone
 from django.db import transaction
 from django.conf import settings
+from urllib.parse import urlparse
 
 from reconnaissance.subdomain_enumerator import SubdomainEnumerator
 from reconnaissance.scanner import PortScanner
@@ -48,6 +50,7 @@ class WorkflowOrchestrator:
     }
     
     def __init__(self):
+        self.logger = logging.getLogger(__name__)
         self.subdomain_enumerator = SubdomainEnumerator()
         self.port_scanner = PortScanner()
         self.service_identifier = ServiceIdentifier()
@@ -55,6 +58,45 @@ class WorkflowOrchestrator:
         self.topology_mapper = TopologyMapper()
         self.report_generator = ReportGenerator()
         self.notification_manager = NotificationManager()
+    
+    def parse_target_url(self, url: str) -> str:
+        """
+        Parse a target URL and extract just the hostname.
+        Handles various URL formats including those with protocols, paths, query strings, etc.
+        
+        Args:
+            url: The target URL to parse
+            
+        Returns:
+            str: The clean hostname
+        """
+        # Handle empty values
+        if not url:
+            return ""
+        
+        try:
+            # Remove protocol if present by using urlparse
+            parsed = urlparse(url)
+            
+            # If netloc is empty, the URL might not have a protocol
+            if not parsed.netloc:
+                # Try adding a protocol and parsing again
+                parsed = urlparse(f"http://{url}")
+            
+            # Extract just the hostname (netloc without port)
+            hostname = parsed.netloc
+            if ':' in hostname:
+                hostname = hostname.split(':', 1)[0]
+                
+            # If still empty, return the original url as a last resort
+            if not hostname:
+                return url
+                
+            return hostname
+        except Exception as e:
+            self.logger.error(f"Error parsing URL {url}: {str(e)}")
+            # Return the original URL if parsing fails
+            return url
     
     def setup_workflow(self, workflow, target: str, scan_profile: str = 'standard'):
         """
@@ -109,7 +151,7 @@ class WorkflowOrchestrator:
         workflow.end_time = timezone.now()
         workflow.save()
         
-        logger.info(f"Workflow {workflow.id} for {workflow.target} completed successfully")
+        self.logger.info(f"Workflow {workflow.id} for {workflow.target} completed successfully")
         
         # Send completion notification
         if workflow.notification_email:
@@ -195,7 +237,7 @@ class WorkflowOrchestrator:
             if workflow.status == 'scheduled' and workflow.scheduled_time:
                 now = timezone.now()
                 if now < workflow.scheduled_time:
-                    logger.info(f"Workflow {workflow_id} is scheduled for {workflow.scheduled_time}, not starting yet")
+                    self.logger.info(f"Workflow {workflow_id} is scheduled for {workflow.scheduled_time}, not starting yet")
                     return False
             
             # Update workflow status
@@ -203,7 +245,7 @@ class WorkflowOrchestrator:
             workflow.start_time = timezone.now()
             workflow.save()
             
-            logger.info(f"Starting workflow {workflow_id} for target {workflow.target}")
+            self.logger.info(f"Starting workflow {workflow_id} for target {workflow.target}")
             
             # Get tasks with no dependencies (entry points)
             entry_tasks = ScanTask.objects.filter(
@@ -218,10 +260,10 @@ class WorkflowOrchestrator:
             return True
             
         except ScanWorkflow.DoesNotExist:
-            logger.error(f"Workflow {workflow_id} not found")
+            self.logger.error(f"Workflow {workflow_id} not found")
             return False
         except Exception as e:
-            logger.error(f"Error starting workflow {workflow_id}: {str(e)}")
+            self.logger.error(f"Error starting workflow {workflow_id}: {str(e)}")
             return False
     
     def check_pending_workflows(self) -> int:
@@ -295,7 +337,7 @@ class WorkflowOrchestrator:
             task.start_time = timezone.now()
             task.save()
             
-            logger.info(f"Executing task {task.id} ({task.task_type}) for workflow {task.workflow.id}")
+            self.logger.info(f"Executing task {task.id} ({task.task_type}) for workflow {task.workflow.id}")
             
             # Execute appropriate task type
             if task.task_type == 'subdomain_enumeration':
@@ -335,7 +377,7 @@ class WorkflowOrchestrator:
                 self._fail_workflow(task.workflow, f"Critical task {task.task_type} failed")
                 
         except Exception as e:
-            logger.error(f"Error executing task {task.id}: {str(e)}")
+            self.logger.error(f"Error executing task {task.id}: {str(e)}")
             task.status = 'failed'
             task.result = json.dumps({'error': str(e)})
             task.end_time = timezone.now()
@@ -345,53 +387,161 @@ class WorkflowOrchestrator:
             if task.workflow.notification_email:
                 self.notification_manager.send_task_failure_notification(task, str(e))
     
+# File: automation/workflow_orchestrator.py
+# Update the _run_subdomain_enumeration method to handle subdomain enumeration issues
+
     def _run_subdomain_enumeration(self, task: ScanTask) -> dict:
-        """Run subdomain enumeration task"""
-        target = task.workflow.target
+        """Run subdomain enumeration task with improved URL handling and reliability"""
+        # Get the original target from the task
+        original_target = task.workflow.target
+        
+        # Clean the target URL to get just the domain
+        target_url = self.parse_target_url(original_target)
+        
+        # Remove 'www.' prefix if present for better subdomain enumeration
+        if target_url.startswith('www.'):
+            search_domain = target_url[4:]  # Remove www. prefix
+            self.logger.info(f"Removing www prefix for enumeration, using: {search_domain}")
+        else:
+            search_domain = target_url
+            
         try:
-            results = self.subdomain_enumerator.enumerate_subdomains(target)
+            self.logger.info(f"Starting subdomain enumeration for {search_domain} (original: {original_target})")
+            results = self.subdomain_enumerator.enumerate_subdomains(search_domain)
+            
+            # If no results returned, add the main domain as a fallback
+            if not results:
+                self.logger.warning(f"No subdomains found for {search_domain}, adding main domain as fallback")
+                try:
+                    main_ip = socket.gethostbyname(search_domain)
+                    results = [{
+                        'subdomain': search_domain,
+                        'ip_address': main_ip,
+                        'is_http': True,
+                        'http_status': None,
+                        'status': 'active'
+                    }]
+                except Exception as e:
+                    self.logger.error(f"Failed to resolve main domain as fallback: {str(e)}")
+                    results = [{
+                        'subdomain': search_domain,
+                        'ip_address': None,
+                        'is_http': None,
+                        'http_status': None,
+                        'status': 'unknown'
+                    }]
+            
+            # Save results to database to ensure they're available for later steps
+            saved_count = 0
+            from reconnaissance.models import Subdomain  # Import the model explicitly
+            
+            for subdomain_data in results:
+                # Skip entries without subdomain
+                if not subdomain_data.get('subdomain'):
+                    continue
+                    
+                try:
+                    sub_obj, created = Subdomain.objects.update_or_create(
+                        domain=search_domain,
+                        subdomain=subdomain_data['subdomain'],
+                        defaults={
+                            'ip_address': subdomain_data.get('ip_address'),
+                            'is_active': True
+                        }
+                    )
+                    saved_count += 1
+                except Exception as save_error:
+                    self.logger.error(f"Error saving subdomain: {str(save_error)}")
+            
+            self.logger.info(f"Saved {saved_count} subdomains to database")
+            
             return {
                 'status': 'success',
-                'target': target,
+                'target': original_target,  # Return original target for consistency
+                'target_domain': search_domain,  # Use the domain without www for lookup
                 'subdomains_found': len(results),
                 'subdomains': results
             }
         except Exception as e:
-            logger.error(f"Subdomain enumeration failed: {str(e)}")
-            return {
-                'status': 'error',
-                'error': f"Subdomain enumeration failed: {str(e)}"
-            }
+            self.logger.error(f"Subdomain enumeration failed: {str(e)}")
+            # Create a fallback result with just the main domain
+            try:
+                # Add the main domain as a subdomain in the database
+                from reconnaissance.models import Subdomain  # Import the model explicitly
+                
+                sub_obj, created = Subdomain.objects.update_or_create(
+                    domain=search_domain,
+                    subdomain=search_domain,
+                    defaults={
+                        'ip_address': socket.gethostbyname(search_domain),
+                        'is_active': True
+                    }
+                )
+                
+                return {
+                    'status': 'success',  # Return success to continue workflow
+                    'target': original_target,
+                    'target_domain': search_domain,
+                    'subdomains_found': 1, 
+                    'subdomains': [{
+                        'subdomain': search_domain,
+                        'ip_address': sub_obj.ip_address,
+                        'is_http': None,
+                        'http_status': None,
+                        'status': 'active'
+                    }],
+                    'warning': f"Error during subdomain scan: {str(e)}. Using main domain only."
+                }
+            except Exception as fallback_error:
+                # Absolute last resort - return minimal data to allow workflow to continue
+                return {
+                    'status': 'success',  # Return success to continue workflow
+                    'target': original_target,
+                    'target_domain': search_domain,
+                    'subdomains_found': 1,
+                    'subdomains': [{
+                        'subdomain': search_domain, 
+                        'ip_address': None,
+                        'is_http': None,
+                        'http_status': None,
+                        'status': 'unknown'
+                    }],
+                    'warning': f"Subdomain enumeration failed: {str(e)}. Using main domain as fallback."
+                }
     
     def _run_port_scanning(self, task: ScanTask) -> dict:
-        """Run port scanning task with improved manual detection"""
-        target = task.workflow.target
+        """Run port scanning task with improved URL handling and database storage"""
+        # Get the original target from the task
+        original_target = task.workflow.target
         scan_profile = task.workflow.scan_profile
+        
+        # Clean the target URL to get just the hostname
+        target_url = self.parse_target_url(original_target)
         
         # Map scan profile to scan type
         scan_type = {
             'quick': 'quick',
             'standard': 'partial',
-            'full': 'full'  # Use 'full' to get the correct scan type
+            'full': 'full'
         }.get(scan_profile, 'partial')
         
-        logger.info(f"Starting port scan for {target} with profile: {scan_profile}, type: {scan_type}")
+        self.logger.info(f"Starting port scan for {target_url} (original: {original_target}) with profile: {scan_profile}, type: {scan_type}")
         
         try:
             # Validate target before scanning
             import socket
             try:
                 # Try to resolve hostname to ensure it's valid
-                socket.gethostbyname(target)
+                socket.gethostbyname(target_url)
             except socket.gaierror:
-                logger.error(f"Unable to resolve target: {target}")
+                self.logger.error(f"Unable to resolve target: {target_url}")
                 return {
                     'status': 'error',
-                    'error': f"Unable to resolve target: {target}. Please check the domain name."
+                    'error': f"Unable to resolve target: {target_url}. Please check the domain name."
                 }
             
             # First run a quick check to see if common ports are open
-            # since this is more reliable than waiting for nmap
+            # This is more reliable than waiting for nmap
             common_ports = [80, 443, 8080, 8443, 22, 21]
             manual_check_ports = []
             
@@ -399,15 +549,15 @@ class WorkflowOrchestrator:
                 try:
                     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                         sock.settimeout(1)
-                        result = sock.connect_ex((target, port))
+                        result = sock.connect_ex((target_url, port))
                         if result == 0:
                             manual_check_ports.append(port)
-                            logger.info(f"Manual port check found open port {port} on {target}")
+                            self.logger.info(f"Manual port check found open port {port} on {target_url}")
                 except Exception as e:
-                    logger.debug(f"Socket error checking port {port}: {str(e)}")
+                    self.logger.debug(f"Socket error checking port {port}: {str(e)}")
             
             # Run the actual scan
-            results = self.port_scanner.scan(target, scan_type)
+            results = self.port_scanner.scan(target_url, scan_type)
             
             # Check for success
             if results.get('status') == 'success':
@@ -420,7 +570,7 @@ class WorkflowOrchestrator:
                 
                 # If we have manual ports but no scan ports, add them to the results
                 if not ports_found and manual_check_ports and 'manual_detected' not in results:
-                    logger.info(f"Adding manually detected ports to scan results: {manual_check_ports}")
+                    self.logger.info(f"Adding manually detected ports to scan results: {manual_check_ports}")
                     
                     # Create port data for each manual port
                     manual_ports = []
@@ -438,12 +588,80 @@ class WorkflowOrchestrator:
                         results['results'][0]['ports'] = manual_ports
                     else:
                         results['results'] = [{
-                            'host': target,
+                            'host': target_url,
                             'state': 'up',
                             'ports': manual_ports
                         }]
                     
                     results['manual_added'] = True
+                
+                # Save scan results to the database
+                from reconnaissance.models import PortScan
+                
+                # Track which ports we've saved to avoid duplicates
+                saved_ports = set()
+                saved_count = 0
+                
+                # Process and save all port results
+                for host in results.get('results', []):
+                    for port_data in host.get('ports', []):
+                        port = port_data.get('port')
+                        state = port_data.get('state')
+                        service = port_data.get('service', '')
+                        
+                        # Skip if we already saved this port or if port is invalid
+                        if not port or (target_url, port) in saved_ports:
+                            continue
+                        
+                        try:
+                            # Create or update port scan record
+                            port_scan, created = PortScan.objects.update_or_create(
+                                host=target_url,
+                                port=port,
+                                defaults={
+                                    'service': service,
+                                    'state': state,
+                                    'protocol': 'tcp',
+                                    'scan_status': 'completed',
+                                    'scan_type': scan_type,
+                                    'banner': port_data.get('extrainfo', ''),
+                                    'notes': f"Version: {port_data.get('version', 'unknown')}"
+                                }
+                            )
+                            
+                            saved_ports.add((target_url, port))
+                            saved_count += 1
+                            
+                            # Check if this port should be flagged as a vulnerability
+                            if state == 'open' and service in ['ftp', 'telnet', 'rsh', 'rlogin']:
+                                from vulnerability.models import Vulnerability
+                                
+                                # Create a vulnerability entry for high-risk open ports
+                                Vulnerability.objects.get_or_create(
+                                    target=target_url,
+                                    name=f"Open {service.upper()} Port ({port})",
+                                    defaults={
+                                        'description': f"Port {port} is open and running {service}, which is potentially insecure.",
+                                        'severity': 'HIGH',
+                                        'vuln_type': 'open_port',
+                                        'evidence': f"Port {port} is open and accessible.",
+                                        'source': 'port_scan',
+                                        'confidence': 'high',
+                                        'cvss_score': 7.5,
+                                        'is_fixed': False
+                                    }
+                                )
+                            
+                        except Exception as save_error:
+                            self.logger.error(f"Error saving port scan result: {str(save_error)}")
+                
+                self.logger.info(f"Saved {saved_count} port scan results to database")
+                
+                # Add database save info to results
+                results['database_saved'] = {
+                    'saved_count': saved_count,
+                    'target': target_url
+                }
                 
                 return results
             else:
@@ -451,7 +669,7 @@ class WorkflowOrchestrator:
                 
                 # If we have manually detected ports, return those instead
                 if manual_check_ports:
-                    logger.info(f"Using manually detected ports after scan error: {manual_check_ports}")
+                    self.logger.info(f"Using manually detected ports after scan error: {manual_check_ports}")
                     
                     # Create port data for each manual port
                     manual_ports = []
@@ -464,6 +682,30 @@ class WorkflowOrchestrator:
                             'reason': 'manual check'
                         })
                     
+                    # Save manual results to database
+                    from reconnaissance.models import PortScan
+                    saved_count = 0
+                    
+                    for port_data in manual_ports:
+                        try:
+                            port_scan, created = PortScan.objects.update_or_create(
+                                host=target_url,
+                                port=port_data['port'],
+                                defaults={
+                                    'service': port_data['service'],
+                                    'state': 'open',
+                                    'protocol': 'tcp',
+                                    'scan_status': 'completed',
+                                    'scan_type': 'manual',
+                                    'notes': 'Detected by manual scan'
+                                }
+                            )
+                            saved_count += 1
+                        except Exception as save_error:
+                            self.logger.error(f"Error saving manual port result: {str(save_error)}")
+                    
+                    self.logger.info(f"Saved {saved_count} manual port results to database")
+                    
                     return {
                         'status': 'success',
                         'scan_info': {
@@ -471,30 +713,37 @@ class WorkflowOrchestrator:
                             'command_line': 'Manual port check',
                         },
                         'results': [{
-                            'host': target,
+                            'host': target_url,
                             'state': 'up',
                             'ports': manual_ports
                         }],
-                        'manual_only': True
+                        'manual_only': True,
+                        'database_saved': {
+                            'saved_count': saved_count,
+                            'target': target_url
+                        }
                     }
                 
-                logger.error(f"Port scanning error: {error_msg}")
+                self.logger.error(f"Port scanning error: {error_msg}")
                 return {
                     'status': 'error',
                     'error': error_msg
                 }
         except Exception as e:
-            logger.error(f"Port scanning failed: {str(e)}")
+            self.logger.error(f"Port scanning failed: {str(e)}")
             return {
                 'status': 'error',
                 'error': f"Port scanning failed: {str(e)}"
             }
     
-# Update in automation/workflow_orchestrator.py
     def _run_service_identification(self, task: ScanTask) -> dict:
-        """Run service identification task with improved timeout handling"""
-        target = task.workflow.target
+        """Run service identification task with improved URL handling and database storage"""
+        # Get the original target from the task
+        original_target = task.workflow.target
         scan_profile = task.workflow.scan_profile
+        
+        # Clean the target URL to get just the hostname
+        target_url = self.parse_target_url(original_target)
         
         # Map scan profile to service ID scan type
         scan_type = {
@@ -510,7 +759,7 @@ class WorkflowOrchestrator:
             'full': 600      # 10 minutes 
         }.get(scan_profile, 300)
         
-        logger.info(f"Starting service identification for {target} with type: {scan_type}, timeout: {time_limit}s")
+        self.logger.info(f"Starting service identification for {target_url} with type: {scan_type}, timeout: {time_limit}s")
         
         try:
             # First check if we have any port scan results to work with
@@ -521,7 +770,7 @@ class WorkflowOrchestrator:
             ).first()
             
             if not port_scan_task or not port_scan_task.result:
-                logger.warning(f"No completed port scan found for service identification")
+                self.logger.warning(f"No completed port scan found for service identification")
                 
                 # Do a quick manual check for common ports
                 try:
@@ -532,19 +781,21 @@ class WorkflowOrchestrator:
                         try:
                             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                                 sock.settimeout(1)
-                                result = sock.connect_ex((target, port))
+                                result = sock.connect_ex((target_url, port))
                                 if result == 0:
                                     found_ports.append(port)
                         except:
                             pass
                     
                     if found_ports:
-                        logger.info(f"Manual check found {len(found_ports)} open ports for service identification")
+                        self.logger.info(f"Manual check found {len(found_ports)} open ports for service identification")
                         # Create simple service details
                         services = []
                         for port in found_ports:
                             service_name = 'https' if port in [443, 8443] else 'http' if port in [80, 8080] else 'unknown'
                             category = 'web' if port in [80, 443, 8080, 8443] else 'other'
+                            risk_level = 'LOW' if service_name == 'https' else 'MEDIUM'
+                            
                             services.append({
                                 'port': port,
                                 'protocol': 'tcp',
@@ -556,29 +807,33 @@ class WorkflowOrchestrator:
                                     'extrainfo': 'Detected by manual scan',
                                 },
                                 'category': category,
-                                'risk_level': 'MEDIUM'
+                                'risk_level': risk_level
                             })
+                        
+                        # Save services to database
+                        self._save_services_to_database(target_url, services)
                         
                         return {
                             'status': 'success',
-                            'target': target,
+                            'target': original_target,
                             'services': services,
-                            'manual_detection': True
+                            'manual_detection': True,
+                            'database_saved': True
                         }
                     else:
                         # Return empty results to continue workflow
                         return {
                             'status': 'success',
-                            'target': target,
+                            'target': original_target,
                             'services': [],
                             'warning': 'No port scan results available'
                         }
                 except Exception as e:
-                    logger.error(f"Manual port check failed: {str(e)}")
+                    self.logger.error(f"Manual port check failed: {str(e)}")
                     # Still return success with empty results to continue workflow
                     return {
                         'status': 'success',
-                        'target': target,
+                        'target': original_target,
                         'services': [],
                         'warning': 'No port scan results available'
                     }
@@ -589,8 +844,8 @@ class WorkflowOrchestrator:
                 scan_results = json.loads(port_scan_task.result)
                 
                 # Check if manually detected ports exist
-                if scan_results.get('manual_scan') or scan_results.get('manual_detected'):
-                    logger.info("Using manually detected ports for service identification")
+                if scan_results.get('manual_scan') or scan_results.get('manual_detected') or scan_results.get('manual_only') or scan_results.get('manual_added'):
+                    self.logger.info("Using manually detected ports for service identification")
                     
                     services = []
                     for host in scan_results.get('results', []):
@@ -601,6 +856,8 @@ class WorkflowOrchestrator:
                             
                             if state == 'open':
                                 category = 'web' if service_name in ['http', 'https'] else 'other'
+                                risk_level = 'LOW' if service_name == 'https' else 'MEDIUM'
+                                
                                 services.append({
                                     'port': port,
                                     'protocol': 'tcp',
@@ -612,27 +869,31 @@ class WorkflowOrchestrator:
                                         'extrainfo': 'Detected by manual scan',
                                     },
                                     'category': category,
-                                    'risk_level': 'MEDIUM'
+                                    'risk_level': risk_level
                                 })
+                    
+                    # Save services to database
+                    self._save_services_to_database(target_url, services)
                     
                     return {
                         'status': 'success',
-                        'target': target,
+                        'target': original_target,
                         'services': services,
-                        'manual_identification': True
+                        'manual_identification': True,
+                        'database_saved': True
                     }
                 
                 # Regular processing
                 if not scan_results.get('results') or not any(host.get('ports') for host in scan_results.get('results', [])):
-                    logger.warning(f"No open ports found in port scan results")
+                    self.logger.warning(f"No open ports found in port scan results")
                     return {
                         'status': 'success',
-                        'target': target,
+                        'target': original_target,
                         'services': [],
                         'warning': 'No open ports found for service identification'
                     }
             except Exception as parse_error:
-                logger.error(f"Error parsing port scan results: {str(parse_error)}")
+                self.logger.error(f"Error parsing port scan results: {str(parse_error)}")
             
             # Import needed for timeout handling
             import threading
@@ -645,10 +906,10 @@ class WorkflowOrchestrator:
             # Define a worker function
             def service_scan_worker():
                 try:
-                    scan_result = self.service_identifier.identify_services(target, scan_type)
+                    scan_result = self.service_identifier.identify_services(target_url, scan_type)
                     result_queue.put(scan_result)
                 except Exception as e:
-                    logger.error(f"Service scan worker error: {str(e)}")
+                    self.logger.error(f"Service scan worker error: {str(e)}")
                     result_queue.put({
                         'status': 'error',
                         'error': str(e)
@@ -663,97 +924,196 @@ class WorkflowOrchestrator:
             start_time = time.time()
             try:
                 result = result_queue.get(timeout=time_limit)
-                logger.info(f"Service identification completed in {time.time() - start_time:.1f} seconds")
+                self.logger.info(f"Service identification completed in {time.time() - start_time:.1f} seconds")
             except queue.Empty:
-                logger.error(f"Service identification timed out after {time_limit} seconds")
+                self.logger.error(f"Service identification timed out after {time_limit} seconds")
                 # Return success with limited info to continue workflow
                 return {
                     'status': 'success',
-                    'target': target,
+                    'target': original_target,
                     'services': [],
                     'warning': f'Service identification timed out after {time_limit}s'
                 }
             
             if result.get('status') == 'success':
+                # If target in result doesn't match our original, update it
+                if 'target' in result:
+                    result['target'] = original_target
+                
+                # Save services to database
+                services = result.get('services', [])
+                if services:
+                    self._save_services_to_database(target_url, services)
+                    result['database_saved'] = True
+                
                 return result
             else:
-                logger.error(f"Service identification failed: {result.get('error')}")
+                self.logger.error(f"Service identification failed: {result.get('error')}")
                 # Even if the scan fails, return success with empty results to continue workflow
                 return {
                     'status': 'success',
-                    'target': target,
+                    'target': original_target,
                     'services': [],
                     'warning': f"Service identification error: {result.get('error', 'Unknown error')}"
                 }
-                
         except Exception as e:
-            logger.error(f"Service identification failed: {str(e)}")
+            self.logger.error(f"Service identification failed: {str(e)}")
             # Return success with empty results to continue workflow
             return {
                 'status': 'success',
-                'target': target,
+                'target': original_target,
                 'services': [],
                 'warning': f"Service identification error: {str(e)}"
             }
+
+    def _save_services_to_database(self, target: str, services: List[Dict]) -> int:
+        """Save service identification results to database
+        
+        Args:
+            target: The target domain/IP
+            services: List of service dictionaries
             
-            # Define a worker function
-            def service_scan_worker():
-                try:
-                    scan_result = self.service_identifier.identify_services(target, scan_type)
-                    result_queue.put(scan_result)
-                except Exception as e:
-                    logger.error(f"Service scan worker error: {str(e)}")
-                    result_queue.put({
-                        'status': 'error',
-                        'error': str(e)
-                    })
+        Returns:
+            int: Number of services saved
+        """
+        if not services:
+            return 0
             
-            # Start the worker thread
-            worker_thread = threading.Thread(target=service_scan_worker)
-            worker_thread.daemon = True
-            worker_thread.start()
-            
-            # Wait for result with timeout
-            start_time = time.time()
+        from reconnaissance.models import Service
+        from vulnerability.models import Vulnerability
+        
+        saved_count = 0
+        
+        # High risk services that should be flagged as vulnerabilities
+        high_risk_services = {
+            'ftp': 'File Transfer Protocol (FTP)',
+            'telnet': 'Telnet Remote Access',
+            'rsh': 'Remote Shell (RSH)',
+            'rlogin': 'Remote Login (Rlogin)',
+            'smb': 'Windows File Sharing (SMB)'
+        }
+        
+        # Medium risk services
+        medium_risk_services = {
+            'smtp': 'Mail Server (SMTP)',
+            'pop3': 'Mail Server (POP3)',
+            'vnc': 'VNC Remote Desktop',
+            'mysql': 'MySQL Database',
+            'mssql': 'Microsoft SQL Server'
+        }
+        
+        for service_data in services:
             try:
-                result = result_queue.get(timeout=time_limit)
-                logger.info(f"Service identification completed in {time.time() - start_time:.1f} seconds")
-            except queue.Empty:
-                logger.error(f"Service identification timed out after {time_limit} seconds")
-                # Return success with limited info to continue workflow
-                return {
-                    'status': 'success',
-                    'target': target,
-                    'services': [],
-                    'warning': f'Service identification timed out after {time_limit}s'
-                }
-            
-            if result.get('status') == 'success':
-                return result
-            else:
-                logger.error(f"Service identification failed: {result.get('error')}")
-                # Even if the scan fails, return success with empty results to continue workflow
-                return {
-                    'status': 'success',
-                    'target': target,
-                    'services': [],
-                    'warning': f"Service identification error: {result.get('error', 'Unknown error')}"
-                }
+                port = service_data.get('port')
+                if not port:
+                    continue
+                    
+                # Extract service details
+                protocol = service_data.get('protocol', 'tcp')
+                state = service_data.get('state', 'open')
+                service_info = service_data.get('service', {})
                 
-        except Exception as e:
-            logger.error(f"Service identification failed: {str(e)}")
-            # Return success with empty results to continue workflow
-            return {
-                'status': 'success',
-                'target': target,
-                'services': [],
-                'warning': f"Service identification error: {str(e)}"
-            }
+                if not service_info:
+                    continue
+                    
+                service_name = service_info.get('name', 'unknown')
+                product = service_info.get('product', '')
+                version = service_info.get('version', '')
+                extra_info = service_info.get('extrainfo', '')
+                category = service_data.get('category', 'other')
+                risk_level = service_data.get('risk_level', 'MEDIUM')
+                
+                # Create or update service record
+                service_obj, created = Service.objects.update_or_create(
+                    host=target,
+                    port=port,
+                    protocol=protocol,
+                    defaults={
+                        'name': service_name,
+                        'product': product,
+                        'version': version,
+                        'extra_info': extra_info,
+                        'category': category,
+                        'risk_level': risk_level,
+                        'is_active': True
+                    }
+                )
+                
+                saved_count += 1
+                
+                # Check if this service should be flagged as a vulnerability
+                if state == 'open':
+                    # For high risk services
+                    if service_name.lower() in high_risk_services:
+                        service_title = high_risk_services[service_name.lower()]
+                        
+                        # Create vulnerability entry
+                        Vulnerability.objects.get_or_create(
+                            target=target,
+                            name=f"{service_title} on port {port}",
+                            defaults={
+                                'description': f"Port {port} is running {service_name}, which is potentially insecure. {product} {version}".strip(),
+                                'severity': 'HIGH',
+                                'vuln_type': 'insecure_service',
+                                'evidence': f"Service detected on port {port}. {extra_info}".strip(),
+                                'source': 'service_identification',
+                                'confidence': 'high',
+                                'cvss_score': 7.5,
+                                'is_fixed': False
+                            }
+                        )
+                    
+                    # For medium risk services
+                    elif service_name.lower() in medium_risk_services:
+                        service_title = medium_risk_services[service_name.lower()]
+                        
+                        # Create vulnerability entry
+                        Vulnerability.objects.get_or_create(
+                            target=target,
+                            name=f"{service_title} on port {port}",
+                            defaults={
+                                'description': f"Port {port} is running {service_name}, which might pose security risks if not properly configured. {product} {version}".strip(),
+                                'severity': 'MEDIUM',
+                                'vuln_type': 'potentially_risky_service',
+                                'evidence': f"Service detected on port {port}. {extra_info}".strip(),
+                                'source': 'service_identification',
+                                'confidence': 'medium',
+                                'cvss_score': 5.0,
+                                'is_fixed': False
+                            }
+                        )
+                        
+                    # Flag uncommon open ports    
+                    elif port not in [80, 443, 8080, 8443, 22] and port < 1024:
+                        # Create vulnerability entry for uncommon open ports
+                        Vulnerability.objects.get_or_create(
+                            target=target,
+                            name=f"Uncommon service on port {port} ({service_name})",
+                            defaults={
+                                'description': f"Port {port} is open and running {service_name}, which is uncommon and might indicate unnecessary services.",
+                                'severity': 'LOW',
+                                'vuln_type': 'uncommon_port',
+                                'evidence': f"Service {service_name} detected on port {port}.",
+                                'source': 'service_identification',
+                                'confidence': 'medium',
+                                'cvss_score': 3.0,
+                                'is_fixed': False
+                            }
+                        )
+                    
+            except Exception as e:
+                self.logger.error(f"Error saving service to database: {str(e)}")
+        
+        return saved_count
     
     def _run_vulnerability_scanning(self, task: ScanTask) -> dict:
-        """Run vulnerability scanning task"""
-        target = task.workflow.target
+        """Run vulnerability scanning task with improved URL handling"""
+        # Get the original target from the task
+        original_target = task.workflow.target
         scan_profile = task.workflow.scan_profile
+        
+        # Clean the target URL to get just the hostname
+        target_url = self.parse_target_url(original_target)
         
         # Determine scanners to use based on scan profile
         include_zap = scan_profile in ['standard', 'full']
@@ -761,8 +1121,10 @@ class WorkflowOrchestrator:
         nuclei_scan_type = 'advanced' if scan_profile == 'full' else 'basic'
         
         try:
+            self.logger.info(f"Starting vulnerability scan for {target_url} (original: {original_target})")
+            
             results = self.vulnerability_scanner.scan_target(
-                target=target,
+                target=target_url,
                 scan_type=scan_profile,
                 include_zap=include_zap,
                 include_nuclei=include_nuclei,
@@ -794,35 +1156,109 @@ class WorkflowOrchestrator:
                     'error': results.get('error', 'Vulnerability scanning failed without specific error')
                 }
         except Exception as e:
-            logger.error(f"Vulnerability scanning failed: {str(e)}")
+            self.logger.error(f"Vulnerability scanning failed: {str(e)}")
             return {
                 'status': 'error', 
                 'error': f"Vulnerability scanning failed: {str(e)}"
             }
     
     def _run_network_mapping(self, task: ScanTask) -> dict:
-        """Run network mapping task"""
-        target = task.workflow.target
+        """Run network mapping task with improved visualization data"""
+        # Get the original target from the task
+        original_target = task.workflow.target
+        
+        # Clean the target URL to get just the hostname
+        target_url = self.parse_target_url(original_target)
         
         try:
-            results = self.topology_mapper.create_network_map(target)
+            self.logger.info(f"Starting network mapping for {target_url} (original: {original_target})")
+            
+            # Get services from previous tasks to include in the network map
+            services_data = []
+            try:
+                service_task = ScanTask.objects.filter(
+                    workflow=task.workflow,
+                    task_type='service_identification',
+                    status='completed'
+                ).first()
+                
+                if service_task and service_task.result:
+                    service_result = json.loads(service_task.result)
+                    services_data = service_result.get('services', [])
+            except Exception as e:
+                self.logger.warning(f"Error fetching service data for network mapping: {str(e)}")
+            
+            # Get subdomains from previous tasks
+            subdomains_data = []
+            try:
+                subdomain_task = ScanTask.objects.filter(
+                    workflow=task.workflow,
+                    task_type='subdomain_enumeration',
+                    status='completed'
+                ).first()
+                
+                if subdomain_task and subdomain_task.result:
+                    subdomain_result = json.loads(subdomain_task.result)
+                    subdomains_data = subdomain_result.get('subdomains', [])
+            except Exception as e:
+                self.logger.warning(f"Error fetching subdomain data for network mapping: {str(e)}")
+            
+            # Create network map
+            results = self.topology_mapper.create_network_map(
+                target_url, 
+                services=services_data,
+                subdomains=subdomains_data
+            )
+            
+            # Get the number of nodes and connections for proper report display
+            nodes_count = 0
+            connections_count = 0
+            
             if results.get('status') == 'success':
+                # Try to get network node counts from the database
+                from network_visualization.models import NetworkNode, NetworkConnection
+                
+                try:
+                    nodes_count = NetworkNode.objects.filter(domain=target_url, is_active=True).count()
+                    connections_count = NetworkConnection.objects.filter(
+                        source__domain=target_url,
+                        is_active=True
+                    ).count()
+                    
+                    self.logger.info(f"Network map created with {nodes_count} nodes and {connections_count} connections")
+                except Exception as db_error:
+                    self.logger.error(f"Error counting network nodes from database: {str(db_error)}")
+                
+                # Add the node and connection counts to the result
+                results['nodes'] = nodes_count
+                results['connections'] = connections_count
+                
                 return results
             else:
                 return {
                     'status': 'error',
-                    'error': results.get('error', 'Network mapping failed without specific error')
+                    'error': results.get('error', 'Network mapping failed without specific error'),
+                    'nodes': 0,
+                    'connections': 0
                 }
         except Exception as e:
-            logger.error(f"Network mapping failed: {str(e)}")
+            self.logger.error(f"Network mapping failed: {str(e)}")
             return {
                 'status': 'error',
-                'error': f"Network mapping failed: {str(e)}"
+                'error': f"Network mapping failed: {str(e)}",
+                'nodes': 0,
+                'connections': 0
             }
     
+# File: automation/workflow_orchestrator.py
     def _run_report_generation(self, task: ScanTask) -> dict:
-        """Run report generation task"""
-        target = task.workflow.target
+        """Run report generation task with improved URL handling"""
+        # Get the original target from the task
+        original_target = task.workflow.target
+        
+        # Clean the target URL for DB lookups if needed
+        target_url = self.parse_target_url(original_target)
+        
         scan_profile = task.workflow.scan_profile
         
         # Map scan profile to report type
@@ -848,8 +1284,14 @@ class WorkflowOrchestrator:
                 except:
                     logger.error("Failed to parse vulnerability scan results")
             
-            # Generate HTML report
-            report_html = self.report_generator.generate_report(report_type, target, 'html', scan_results)
+            # Add workflow ID to the scan results
+            if scan_results is None:
+                scan_results = {}
+            scan_results['workflow_id'] = task.workflow.id
+            
+            # Use original target for report generation
+            logger.info(f"Generating {report_type} report for {original_target}")
+            report_html = self.report_generator.generate_report(report_type, original_target, 'html', scan_results)
             
             # Only send a single notification email
             if task.workflow.notification_email:
@@ -860,7 +1302,8 @@ class WorkflowOrchestrator:
             
             return {
                 'status': 'success',
-                'target': target,
+                'target': original_target,
+                'workflow_id': task.workflow.id,  # Include workflow ID in the result
                 'report_types': [report_type],
                 'report_formats': ['html'],
                 'report_ids': {
@@ -1039,5 +1482,3 @@ class WorkflowOrchestrator:
             summary['report_ids'] = result.get('report_ids', {})
             
         return summary
-    
-    

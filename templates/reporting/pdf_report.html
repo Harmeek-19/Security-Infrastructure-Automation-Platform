@@ -1,109 +1,238 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="UTF-8">
-    <title>Security Scan Report - {{ report.title }}</title>
+    <meta charset="utf-8">
+    <title>Security Scan Report - {{ target }}</title>
     <style>
-        @page {
-            size: letter portrait;
-            margin: 2cm;
-        }
         body {
-            font-family: sans-serif;
+            font-family: Arial, sans-serif;
             line-height: 1.5;
-            font-size: 11pt;
-        }
-        h1 {
+            margin: 0;
+            padding: 20px;
             color: #333;
-            font-size: 22pt;
-            margin-bottom: 0.5cm;
         }
-        h2 {
-            color: #2c3e50;
-            font-size: 16pt;
-            margin-top: 1cm;
-            margin-bottom: 0.5cm;
+        
+        .report-header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding-bottom: 10px;
             border-bottom: 1px solid #eee;
-            padding-bottom: 5px;
         }
-        h3 {
-            color: #34495e;
-            font-size: 14pt;
-            margin-top: 0.8cm;
-            margin-bottom: 0.3cm;
+        
+        .section {
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
         }
+        
+        .section-title {
+            background-color: #f8f8f8;
+            padding: 8px;
+            margin-bottom: 15px;
+            border-left: 4px solid #4caf50;
+        }
+        
         table {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 0.5cm;
+            margin-bottom: 20px;
         }
-        th {
-            background-color: #f5f5f5;
-            border-bottom: 2px solid #ddd;
+        
+        th, td {
             padding: 8px;
             text-align: left;
+            border-bottom: 1px solid #ddd;
         }
-        td {
-            border-bottom: 1px solid #eee;
-            padding: 8px;
+        
+        th {
+            background-color: #f2f2f2;
         }
-        .severity-critical {
-            color: #d81b60;
-            font-weight: bold;
+        
+        .vuln-item {
+            margin-bottom: 30px;
+            padding-bottom: 15px;
+            border-bottom: 1px dashed #ccc;
         }
-        .severity-high {
-            color: #e65100;
-            font-weight: bold;
+        
+        .vuln-CRITICAL, .vuln-critical {
+            border-left: 5px solid #d32f2f;
+            padding-left: 10px;
         }
-        .severity-medium {
-            color: #f57c00;
-            font-weight: bold;
+        
+        .vuln-HIGH, .vuln-high {
+            border-left: 5px solid #f44336;
+            padding-left: 10px;
         }
-        .severity-low {
-            color: #388e3c;
+        
+        .vuln-MEDIUM, .vuln-medium {
+            border-left: 5px solid #ff9800;
+            padding-left: 10px;
         }
-        .summary-box {
-            background-color: #f9f9f9;
+        
+        .vuln-LOW, .vuln-low {
+            border-left: 5px solid #2196f3;
+            padding-left: 10px;
+        }
+        
+        .vuln-INFO, .vuln-info {
+            border-left: 5px solid #9e9e9e;
+            padding-left: 10px;
+        }
+        
+        .evidence-box {
+            background-color: #f8f8f8;
             padding: 10px;
-            margin-bottom: 15px;
-            border-radius: 5px;
+            margin: 10px 0;
+            font-family: monospace;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            font-size: 12px;
         }
-        .footer {
-            position: fixed;
-            bottom: 0;
-            width: 100%;
-            border-top: 1px solid #eee;
-            padding-top: 10px;
-            font-size: 9pt;
-            color: #666;
+        
+        footer {
             text-align: center;
+            margin-top: 30px;
+            font-size: 12px;
+            color: #999;
+        }
+        
+        /* Added summary box styles from the first template */
+        .summary-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+        
+        .summary-box {
+            flex: 1;
+            min-width: 200px;
+            padding: 15px;
+            margin: 10px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        
+        .number {
+            font-size: 36px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        
+        .label {
+            font-size: 14px;
+            color: #555;
+        }
+        
+        .severity-high, .severity-HIGH, .severity-CRITICAL, .severity-critical {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        
+        .severity-medium, .severity-MEDIUM {
+            color: #f39c12;
+            font-weight: bold;
+        }
+        
+        .severity-low, .severity-LOW {
+            color: #3498db;
+        }
+        
+        .severity-info, .severity-INFO {
+            color: #7f8c8d;
         }
     </style>
 </head>
 <body>
-    <h1>Security Scan Report - {{ report_data.target }}</h1>
-    <p>Generated on: {{ report.creation_date }}</p>
+    <div class="report-header">
+        <h1>Security Scan Report - {{ target }}</h1>
+        <p>Generated on: {{ report_date }}</p>
+    </div>
     
-    <div class="summary-box">
-        <h2>Executive Summary</h2>
-        <p><strong>Target:</strong> {{ report_data.target }}</p>
-        <p><strong>Scan Date:</strong> {{ report_data.scan_date }}</p>
+    <div class="section">
+        <h2 class="section-title">Executive Summary</h2>
+        <table>
+            <tr>
+                <td><strong>Target:</strong></td>
+                <td>{{ target }}</td>
+            </tr>
+            <tr>
+                <td><strong>Scan Date:</strong></td>
+                <td>{{ scan_date }}</td>
+            </tr>
+        </table>
         
-        <h3>Findings Overview</h3>
+        <!-- Added summary boxes from the first template -->
+        <div class="summary-container">
+            <div class="summary-box">
+                <div class="number">{{ summary.total_vulnerabilities }}</div>
+                <div class="label">Total Vulnerabilities</div>
+            </div>
+            <div class="summary-box">
+                <div class="number severity-high">{{ summary.critical|default:0|add:summary.high|default:0 }}</div>
+                <div class="label">Critical/High Severity</div>
+            </div>
+            <div class="summary-box">
+                <div class="number severity-medium">{{ summary.medium|default:0 }}</div>
+                <div class="label">Medium Severity</div>
+            </div>
+            <div class="summary-box">
+                <div class="number severity-low">{{ summary.low|default:0 }}</div>
+                <div class="label">Low Severity</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="section">
+        <h2 class="section-title">Findings Overview</h2>
         <ul>
-            {% if report_data.detailed_info.vulnerability_severity %}
-                <li><span class="severity-critical">Critical vulnerabilities: {{ report_data.detailed_info.vulnerability_severity.critical }}</span></li>
-                <li><span class="severity-high">High vulnerabilities: {{ report_data.detailed_info.vulnerability_severity.high }}</span></li>
-                <li><span class="severity-medium">Medium vulnerabilities: {{ report_data.detailed_info.vulnerability_severity.medium }}</span></li>
-                <li><span class="severity-low">Low vulnerabilities: {{ report_data.detailed_info.vulnerability_severity.low }}</span></li>
-            {% endif %}
-            <li><strong>Total vulnerabilities:</strong> {{ report_data.summary.total_vulnerabilities }}</li>
-            <li><strong>Open ports:</strong> {{ report_data.summary.open_ports_count }}</li>
+            <li><strong>Total vulnerabilities:</strong> {{ summary.total_vulnerabilities }}</li>
+            <li><strong>Open ports:</strong> {{ summary.open_ports_count }}</li>
         </ul>
     </div>
     
-    {% if report_data.vulnerabilities %}
-        <h2>Vulnerabilities</h2>
+    <!-- Open ports section -->
+<!-- File: templates/reporting/pdf_report.html -->
+<!-- Make sure the open ports section is properly implemented -->
+
+    {% if open_ports %}
+<!-- File: templates/reporting/pdf_report.html -->
+<!-- Update open ports section to always display -->
+
+<div class="section">
+    <h2 class="section-title">Open Ports</h2>
+    {% if open_ports and open_ports|length > 0 %}
+    <table>
+        <thead>
+            <tr>
+                <th>Port</th>
+                <th>Service</th>
+                <th>Protocol</th>
+                <th>State</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for port in open_ports %}
+            <tr>
+                <td>{{ port.port }}</td>
+                <td>{{ port.service }}</td>
+                <td>{{ port.protocol|default:"tcp" }}</td>
+                <td>{{ port.state|default:"open" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No open ports were detected during the scan.</p>
+    {% endif %}
+</div>
+    {% endif %}
+    
+    {% if vulnerabilities %}
+    <div class="section">
+        <h2 class="section-title">Vulnerabilities</h2>
         <table>
             <thead>
                 <tr>
@@ -111,65 +240,51 @@
                     <th>Severity</th>
                     <th>Type</th>
                     <th>Source</th>
+                    <th>CVSS</th>
                 </tr>
             </thead>
             <tbody>
-                {% for vuln in report_data.vulnerabilities %}
+                {% for vuln in vulnerabilities %}
                 <tr>
                     <td>{{ vuln.name }}</td>
                     <td class="severity-{{ vuln.severity|lower }}">{{ vuln.severity }}</td>
-                    <td>{{ vuln.vuln_type }}</td>
+                    <td>{{ vuln.type }}</td>
                     <td>{{ vuln.source }}</td>
+                    <td>{{ vuln.cvss_score|default:"-" }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
         
-        {% for vuln in report_data.vulnerabilities %}
-            <h3>{{ vuln.name }} <span class="severity-{{ vuln.severity|lower }}">({{ vuln.severity }})</span></h3>
+        {% for vuln in vulnerabilities %}
+        <div class="vuln-item vuln-{{ vuln.severity }}">
+            <h3>{{ vuln.name }} ({{ vuln.severity }})</h3>
+            {% if vuln.description %}
             <p><strong>Description:</strong> {{ vuln.description }}</p>
+            {% endif %}
             
             {% if vuln.evidence %}
             <p><strong>Evidence:</strong></p>
-            <div style="background-color: #f5f5f5; padding: 8px; font-family: monospace; white-space: pre-wrap; font-size: 9pt;">{{ vuln.evidence }}</div>
+            <div class="evidence-box">{{ vuln.evidence }}</div>
             {% endif %}
             
-            {% if vuln.solution %}
-            <p><strong>Solution:</strong></p>
-            <div style="background-color: #f0f7ff; padding: 8px; border-left: 3px solid #007bff;">{{ vuln.solution }}</div>
+            {% if vuln.cvss_score %}
+            <p><strong>CVSS Score:</strong> {{ vuln.cvss_score }}</p>
             {% endif %}
             
-            <p><strong>CVSS Score:</strong> {{ vuln.cvss_score|default:"N/A" }}</p>
             <p><strong>Source:</strong> {{ vuln.source }}</p>
+        </div>
         {% endfor %}
-    {% endif %}
-    
-    {% if report_data.open_ports %}
-        <h2>Open Ports</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>Port</th>
-                    <th>Service</th>
-                    <th>State</th>
-                    <th>Protocol</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for port in report_data.open_ports %}
-                <tr>
-                    <td>{{ port.port }}</td>
-                    <td>{{ port.service }}</td>
-                    <td>{{ port.state }}</td>
-                    <td>{{ port.protocol }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    {% endif %}
-    
-    <div class="footer">
-        <p>Security Automation Platform Report - Page <span class="page"></span> of <span class="topage"></span></p>
     </div>
+    {% else %}
+    <div class="section">
+        <h2 class="section-title">Vulnerabilities</h2>
+        <p>No vulnerabilities found.</p>
+    </div>
+    {% endif %}
+    
+    <footer>
+        Security Automation Platform Report
+    </footer>
 </body>
 </html>

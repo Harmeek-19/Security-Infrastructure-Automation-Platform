@@ -1,0 +1,443 @@
+{% extends "base.html" %}
+
+{% block title %}Network Visualization - {{ target }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .network-map-container {
+        width: 100%;
+        height: 600px;
+        border: 1px solid #ddd;
+        margin-top: 20px;
+        background-color: #f8f9fa;
+    }
+    
+    .network-node {
+        fill: #69b3a2;
+        stroke: #fff;
+        stroke-width: 2px;
+    }
+    
+    .network-link {
+        stroke: #999;
+        stroke-opacity: 0.6;
+    }
+    
+    .network-label {
+        font-size: 12px;
+        fill: #333;
+    }
+    
+    /* Legend Styles */
+    .node-legend {
+        display: flex;
+        flex-wrap: wrap;
+        margin-top: 15px;
+    }
+    
+    .legend-item {
+        display: flex;
+        align-items: center;
+        margin-right: 15px;
+        margin-bottom: 5px;
+    }
+    
+    .legend-color {
+        width: 15px;
+        height: 15px;
+        border-radius: 50%;
+        margin-right: 5px;
+    }
+    
+    .alert {
+        padding: 15px;
+        margin-bottom: 20px;
+        border: 1px solid transparent;
+        border-radius: 4px;
+    }
+    
+    .alert-danger {
+        color: #721c24;
+        background-color: #f8d7da;
+        border-color: #f5c6cb;
+    }
+    
+    .alert-warning {
+        color: #856404;
+        background-color: #fff3cd;
+        border-color: #ffeeba;
+    }
+    
+    .alert-info {
+        color: #0c5460;
+        background-color: #d1ecf1;
+        border-color: #bee5eb;
+    }
+    
+    /* Filter button styles */
+    .filter-buttons {
+        margin-bottom: 10px;
+    }
+    
+    .filter-buttons button {
+        padding: 5px 10px;
+        margin-right: 5px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        background-color: #fff;
+        cursor: pointer;
+    }
+    
+    .filter-buttons button:hover {
+        background-color: #f0f0f0;
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<!-- D3.js for Network Visualization -->
+<script src="https://d3js.org/d3.v7.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1>Network Visualization - {{ target }}</h1>
+    
+    <!-- Network Map Visualization Container -->
+    <div id="network-map-container" class="network-map-container"></div>
+    
+    <!-- Node Type Legend -->
+    <div class="node-legend">
+        <div class="legend-item">
+            <div class="legend-color" style="background-color: #4CAF50;"></div>
+            <span>Host</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background-color: #03A9F4;"></div>
+            <span>Subdomain</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background-color: #FF9800;"></div>
+            <span>Service</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background-color: #9C27B0;"></div>
+            <span>Port</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background-color: #F44336;"></div>
+            <span>Vulnerability</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background-color: #795548;"></div>
+            <span>Gateway</span>
+        </div>
+    </div>
+    
+    <!-- JavaScript for Network Map -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            try {
+                // Check if D3.js is loaded
+                if (typeof d3 === 'undefined') {
+                    document.getElementById('network-map-container').innerHTML = 
+                        '<div class="alert alert-warning">D3.js library not loaded. Network visualization requires D3.js.</div>';
+                    return;
+                }
+                
+                // Fetch network data from API
+                fetch('/network/topology/' + encodeURIComponent('{{ target }}') + '/')
+                    .then(function(response) {
+                        if (!response.ok) {
+                            throw new Error('Network response was not ok: ' + response.statusText);
+                        }
+                        return response.json();
+                    })
+                    .then(function(data) {
+                        if (data.status === 'success') {
+                            renderNetworkMap(data.nodes, data.links);
+                        } else {
+                            throw new Error(data.error || 'Failed to load network data');
+                        }
+                    })
+                    .catch(function(error) {
+                        console.error('Error fetching network map data:', error);
+                        document.getElementById('network-map-container').innerHTML = 
+                            '<div class="alert alert-danger">Error loading network map: ' + error.message + '</div>';
+                    });
+            } catch (error) {
+                console.error('Error initializing network map:', error);
+                document.getElementById('network-map-container').innerHTML = 
+                    '<div class="alert alert-danger">Error loading network map: ' + error.message + '</div>';
+            }
+        });
+        
+        function renderNetworkMap(nodes, links) {
+            var container = document.getElementById('network-map-container');
+            if (!container) {
+                console.error('Container not found: network-map-container');
+                return;
+            }
+            
+            // Validate data structure
+            if (!Array.isArray(nodes) || !Array.isArray(links)) {
+                container.innerHTML = '<div class="alert alert-warning">Invalid network data format</div>';
+                return;
+            }
+            
+            if (nodes.length === 0) {
+                container.innerHTML = '<div class="alert alert-info">No network nodes available</div>';
+                return;
+            }
+            
+            // Create force-directed graph
+            var width = container.clientWidth;
+            var height = 600; // Taller for standalone visualization
+            
+            // Clear container first
+            container.innerHTML = '';
+            
+            // Create SVG
+            var svg = d3.select(container).append('svg')
+                .attr('width', width)
+                .attr('height', height);
+                
+            // Define node colors
+            var nodeColors = {
+                'host': '#4CAF50',
+                'subdomain': '#03A9F4',
+                'service': '#FF9800',
+                'port': '#9C27B0',
+                'vulnerability': '#F44336',
+                'gateway': '#795548',
+                'default': '#999999'
+            };
+            
+            // Process links to ensure proper source/target format
+            var linkData = links.map(function(link) {
+                return {
+                    source: link.source,
+                    target: link.target,
+                    type: link.type || ''
+                };
+            });
+            
+            // Add zoom functionality
+            var zoom = d3.zoom()
+                .scaleExtent([0.1, 4])
+                .on('zoom', function(event) {
+                    svg.selectAll('g').attr('transform', event.transform);
+                });
+                
+            svg.call(zoom);
+            
+            // Create links
+            var link = svg.append('g')
+                .attr('class', 'links')
+                .selectAll('line')
+                .data(linkData)
+                .enter().append('line')
+                .attr('stroke', '#999')
+                .attr('stroke-opacity', 0.6)
+                .attr('stroke-width', 1);
+            
+            // Create force simulation
+            var simulation = d3.forceSimulation(nodes)
+                .force('link', d3.forceLink(linkData).id(function(d) { return d.id; }).distance(function(d) {
+                    // Use longer distances for vulnerability nodes
+                    if (d.source.type === 'vulnerability' || d.target.type === 'vulnerability') {
+                        return 150;
+                    }
+                    return 100;
+                }))
+                // Stronger repulsive force, especially for vulnerability nodes
+                .force('charge', d3.forceManyBody().strength(function(d) {
+                    return d.type === 'vulnerability' ? -700 : -300;
+                }))
+                .force('center', d3.forceCenter(width / 2, height / 2))
+                // Stronger collision detection to prevent overlap
+                .force('collision', d3.forceCollide().radius(function(d) {
+                    // Larger collision radius for vulnerabilities
+                    return d.type === 'vulnerability' ? 50 : 30;
+                }));
+            
+            // Modify the node creation with different sizes based on type and severity
+            var node = svg.append('g')
+                .attr('class', 'nodes')
+                .selectAll('circle')
+                .data(nodes)
+                .enter().append('circle')
+                .attr('r', function(d) {
+                    // Size nodes by importance/type
+                    if (d.type === 'host') return 12;
+                    if (d.type === 'subdomain') return 10;
+                    if (d.type === 'service') return 8;
+                    
+                    // Size vulnerabilities by severity
+                    if (d.type === 'vulnerability') {
+                        if (d.name.startsWith('Critical:')) return 9;
+                        if (d.name.startsWith('High:')) return 8;
+                        if (d.name.startsWith('Medium:')) return 7;
+                        if (d.name.startsWith('Low:')) return 6;
+                    }
+                    return 6;
+                })
+                .attr('fill', function(d) { return nodeColors[d.type] || nodeColors.default; })
+                .call(d3.drag()
+                    .on('start', dragstarted)
+                    .on('drag', dragged)
+                    .on('end', dragended));
+            
+            // Add tooltips
+            node.append('title')
+                .text(function(d) { 
+                    var tooltip = d.name + '\nType: ' + d.type;
+                    if (d.info) tooltip += '\n' + d.info;
+                    return tooltip;
+                });
+            
+            // Improve label handling with better placement and collision avoidance
+            var label = svg.append('g')
+                .attr('class', 'labels')
+                .selectAll('text')
+                .data(nodes)
+                .enter().append('text')
+                .text(function(d) {
+                    // Shorten vulnerability names to reduce clutter
+                    if (d.type === 'vulnerability') {
+                        // Extract just the key part of the vulnerability name
+                        let name = d.name;
+                        if (name.includes(':')) {
+                            name = name.split(':')[1].trim();
+                        }
+                        if (name.length > 20) {
+                            return name.substring(0, 17) + '...';
+                        }
+                        return name;
+                    }
+                    
+                    // For other node types, show full name if not too long
+                    if (d.name && d.name.length > 25) {
+                        return d.name.substring(0, 22) + '...';
+                    }
+                    return d.name || '';
+                })
+                .attr('font-size', function(d) {
+                    // Larger font for host and smaller for vulnerabilities
+                    return d.type === 'host' ? 12 : 
+                           d.type === 'vulnerability' ? 8 : 10;
+                })
+                .attr('dx', function(d) {
+                    // Adjust horizontal position based on node type
+                    return d.type === 'host' ? 15 : 12;
+                })
+                .attr('dy', function(d) {
+                    // Adjust vertical position to avoid overlaps
+                    return d.type === 'vulnerability' ? -10 : 4;
+                });
+            
+            // Add a group select function to isolate node types
+            var filterButtons = d3.select('#network-map-container')
+                .append('div')
+                .attr('class', 'filter-buttons')
+                .style('position', 'absolute')
+                .style('top', '10px')
+                .style('left', '10px');
+                
+            filterButtons.append('button')
+                .text('All')
+                .on('click', function() { filterNodes(null); });
+                
+            Object.keys(nodeColors).forEach(function(type) {
+                filterButtons.append('button')
+                    .text(type.charAt(0).toUpperCase() + type.slice(1))
+                    .style('margin-left', '5px')
+                    .on('click', function() { filterNodes(type); });
+            });
+            
+            function filterNodes(type) {
+                if (type === null) {
+                    // Show all nodes
+                    node.style('opacity', 1);
+                    link.style('opacity', 1);
+                    label.style('opacity', 1);
+                } else {
+                    // Show only nodes of selected type and their direct connections
+                    var connectedNodes = new Set();
+                    
+                    // Find all nodes connected to the selected type
+                    linkData.forEach(function(d) {
+                        var sourceType = nodes.find(n => n.id === d.source.id).type;
+                        var targetType = nodes.find(n => n.id === d.target.id).type;
+                        
+                        if (sourceType === type) connectedNodes.add(d.target.id);
+                        if (targetType === type) connectedNodes.add(d.source.id);
+                    });
+                    
+                    // Update visibility
+                    node.style('opacity', function(d) {
+                        return d.type === type || connectedNodes.has(d.id) ? 1 : 0.2;
+                    });
+                    
+                    link.style('opacity', function(d) {
+                        return d.source.type === type || d.target.type === type ? 1 : 0.1;
+                    });
+                    
+                    label.style('opacity', function(d) {
+                        return d.type === type || connectedNodes.has(d.id) ? 1 : 0.2;
+                    });
+                }
+            }
+            
+            // Add a reset view button
+            d3.select('#network-map-container')
+                .append('button')
+                .text('Reset View')
+                .style('position', 'absolute')
+                .style('bottom', '10px')
+                .style('right', '10px')
+                .on('click', function() {
+                    // Reset zoom and position
+                    svg.transition()
+                        .duration(750)
+                        .call(zoom.transform, d3.zoomIdentity);
+                });
+                    
+            // Update positions on simulation tick
+            simulation.on('tick', function() {
+                link
+                    .attr('x1', function(d) { return d.source.x; })
+                    .attr('y1', function(d) { return d.source.y; })
+                    .attr('x2', function(d) { return d.target.x; })
+                    .attr('y2', function(d) { return d.target.y; });
+                    
+                node
+                    .attr('cx', function(d) { return d.x; })
+                    .attr('cy', function(d) { return d.y; });
+                    
+                label
+                    .attr('x', function(d) { return d.x; })
+                    .attr('y', function(d) { return d.y; });
+            });
+            
+            // Drag functions
+            function dragstarted(event, d) {
+                if (!event.active) simulation.alphaTarget(0.3).restart();
+                d.fx = d.x;
+                d.fy = d.y;
+            }
+            
+            function dragged(event, d) {
+                d.fx = event.x;
+                d.fy = event.y;
+            }
+            
+            function dragended(event, d) {
+                if (!event.active) simulation.alphaTarget(0);
+                d.fx = null;
+                d.fy = null;
+            }
+        }
+    </script>
+</div>
+{% endblock %}

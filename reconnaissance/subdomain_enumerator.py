@@ -21,6 +21,9 @@ class SubdomainEnumerator:
             'support', 'api', 'dev', 'staging', 'app', 'portal', 'beta'
         ]
 
+# File: reconnaissance/subdomain_enumerator.py
+# Updates needed in enumerate_subdomains method
+
     def enumerate_subdomains(self, target: str) -> List[Dict]:
         """Main subdomain enumeration method combining multiple techniques"""
         # Clean target - remove protocol and path to get just the domain
@@ -30,9 +33,32 @@ class SubdomainEnumerator:
             return []
             
         self.logger.info(f"Starting subdomain enumeration for domain: {domain}")
+        
+        # Add a basic check to ensure the domain is valid
+        try:
+            socket.gethostbyname(domain)
+        except socket.gaierror:
+            # Add the domain itself as a subdomain if we can't resolve it
+            # This allows the workflow to continue
+            self.logger.warning(f"Domain {domain} could not be resolved, but continuing enumeration")
+        
         discovered_subdomains = set()
         results = []
 
+        # Always add the domain itself to results
+        try:
+            main_domain_ip = socket.gethostbyname(domain)
+            discovered_subdomains.add(domain)
+            results.append({
+                'subdomain': domain,
+                'ip_address': main_domain_ip,
+                'is_http': True,  # Assume main domain has HTTP
+                'http_status': None,
+                'status': 'active'
+            })
+        except Exception as e:
+            self.logger.warning(f"Couldn't resolve main domain {domain}: {str(e)}")
+        
         # 1. DNS enumeration
         dns_results = self._dns_enumeration(domain)
         for subdomain in dns_results:
@@ -58,6 +84,16 @@ class SubdomainEnumerator:
                         results.append(result)
                 except Exception as e:
                     self.logger.error(f"Error validating {subdomain}: {str(e)}")
+
+        # Ensure we have at least the main domain in results
+        if not results and domain:
+            results.append({
+                'subdomain': domain,
+                'ip_address': None,
+                'is_http': None,
+                'http_status': None,
+                'status': 'unknown'
+            })
 
         return results
 
@@ -88,15 +124,23 @@ class SubdomainEnumerator:
         
         try:
             # Try zone transfer first
-            ns_records = self.resolver.resolve(domain, 'NS')
-            for ns in ns_records:
-                try:
-                    zone = dns.zone.from_xfr(dns.query.xfr(str(ns), domain))
-                    for name, _ in zone.nodes.items():
-                        subdomain = str(name) + '.' + domain
-                        discovered.add(subdomain)
-                except:
-                    continue
+            try:
+                ns_records = self.resolver.resolve(domain, 'NS')
+                for ns in ns_records:
+                    try:
+                        zone = dns.zone.from_xfr(dns.query.xfr(str(ns), domain))
+                        for name, _ in zone.nodes.items():
+                            subdomain = str(name) + '.' + domain
+                            discovered.add(subdomain)
+                    except Exception as zone_error:
+                        # Zone transfers often fail due to security restrictions, this is expected
+                        continue
+            except dns.resolver.NoAnswer:
+                self.logger.info(f"No NS records found for {domain} - this is normal for many domains")
+            except dns.resolver.NXDOMAIN:
+                self.logger.info(f"Domain {domain} does not exist in DNS")
+            except Exception as e:
+                self.logger.info(f"NS record query failed for {domain}: {str(e)}")
 
             # Try to get common DNS records
             for record_type in ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'TXT']:
@@ -109,11 +153,16 @@ class SubdomainEnumerator:
                             discovered.add(str(rdata).rstrip('.'))
                         elif record_type == 'CNAME':
                             discovered.add(str(rdata.target).rstrip('.'))
-                except:
+                except dns.resolver.NoAnswer:
+                    # This is normal - not all record types exist for all domains
+                    continue
+                except Exception:
+                    # Other DNS errors are also common and shouldn't stop enumeration
                     continue
 
         except Exception as e:
-            self.logger.error(f"Error in DNS enumeration for {domain}: {str(e)}")
+            # Only log as warning since this is one of multiple enumeration techniques
+            self.logger.warning(f"DNS enumeration had issues for {domain}: {str(e)}")
 
         return discovered
 

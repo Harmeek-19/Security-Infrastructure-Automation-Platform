@@ -1,121 +1,204 @@
-import React, { useState, useEffect } from 'react';
-import { ScatterChart, Scatter, XAxis, YAxis, ZAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
-import _ from 'lodash';
+// NetworkTopologyVisualization.js
 
-const NetworkTopologyVisualization = ({ data }) => {
-  const [processedData, setProcessedData] = useState([]);
-  const [selectedNode, setSelectedNode] = useState(null);
+/**
+ * Network Topology Visualization Component
+ * Renders network mapping data using D3.js
+ */
+class NetworkTopologyVisualization {
+  constructor(containerId) {
+      this.containerId = containerId;
+      this.width = 800;
+      this.height = 600;
+      this.nodeRadius = 15;
+      this.simulation = null;
+      this.svg = null;
+      this.nodeElements = null;
+      this.linkElements = null;
+      this.textElements = null;
+  }
 
-  useEffect(() => {
-    if (!data || !data.nodes || !data.links) return;
-    
-    // Process nodes into a format suitable for visualization
-    const processedNodes = processNetworkData(data);
-    setProcessedData(processedNodes);
-  }, [data]);
+  /**
+   * Initialize the visualization with data
+   * @param {Object} data - Network topology data with nodes and links
+   */
+  init(data) {
+      try {
+          // Ensure data is properly parsed if it's a string
+          if (typeof data === 'string') {
+              try {
+                  data = JSON.parse(data);
+              } catch (e) {
+                  console.error("Error parsing network data:", e);
+                  document.getElementById(this.containerId).innerHTML = 
+                      `<div class="alert alert-danger">Error parsing network data: ${e.message}</div>`;
+                  return;
+              }
+          }
 
-  // Process network data into a suitable format for visualization
-  const processNetworkData = (networkData) => {
-    const nodes = networkData.nodes.map((node, index) => {
-      // Create a circular layout
-      const angle = (2 * Math.PI * index) / networkData.nodes.length;
-      const radius = 100;
-      
-      return {
-        id: node.id,
-        name: node.name,
-        type: node.type,
-        x: Math.cos(angle) * radius + 200, // Center at 200
-        y: Math.sin(angle) * radius + 200, // Center at 200
-        size: getNodeSize(node.type),
-        color: getNodeColor(node.type)
+          // Validate the data structure
+          if (!data || !Array.isArray(data.nodes) || !Array.isArray(data.links)) {
+              console.error("Invalid network data format:", data);
+              document.getElementById(this.containerId).innerHTML = 
+                  `<div class="alert alert-danger">Invalid network data format. Expected nodes and links arrays.</div>`;
+              return;
+          }
+
+          // Create SVG container
+          this.svg = d3.select(`#${this.containerId}`)
+              .append("svg")
+              .attr("width", this.width)
+              .attr("height", this.height)
+              .append("g")
+              .attr("class", "network-container");
+
+          // Add zoom functionality
+          const zoom = d3.zoom()
+              .scaleExtent([0.1, 4])
+              .on("zoom", (event) => {
+                  this.svg.attr("transform", event.transform);
+              });
+
+          d3.select(`#${this.containerId} svg`).call(zoom);
+
+          // Create force simulation
+          this.simulation = d3.forceSimulation()
+              .force("link", d3.forceLink().id(d => d.id).distance(100))
+              .force("charge", d3.forceManyBody().strength(-400))
+              .force("center", d3.forceCenter(this.width / 2, this.height / 2))
+              .force("collision", d3.forceCollide().radius(this.nodeRadius * 1.5));
+
+          // Create links
+          this.linkElements = this.svg.append("g")
+              .attr("class", "links")
+              .selectAll("line")
+              .data(data.links)
+              .enter()
+              .append("line")
+              .attr("stroke-width", 2)
+              .attr("stroke", "#999");
+
+          // Create node groups
+          const nodeGroups = this.svg.append("g")
+              .attr("class", "nodes")
+              .selectAll("g")
+              .data(data.nodes)
+              .enter()
+              .append("g")
+              .call(d3.drag()
+                  .on("start", this.dragStarted.bind(this))
+                  .on("drag", this.dragged.bind(this))
+                  .on("end", this.dragEnded.bind(this)));
+
+          // Add circles to node groups
+          this.nodeElements = nodeGroups.append("circle")
+              .attr("r", this.nodeRadius)
+              .attr("fill", d => this.getNodeColor(d.type))
+              .attr("stroke", "#fff")
+              .attr("stroke-width", 1.5);
+
+          // Add tooltips
+          nodeGroups.append("title")
+              .text(d => `${d.id}\nType: ${d.type}\n${d.info || ''}`);
+
+          // Add text labels
+          this.textElements = nodeGroups.append("text")
+              .text(d => this.getNodeLabel(d))
+              .attr("font-size", 12)
+              .attr("dx", 20)
+              .attr("dy", 4)
+              .attr("fill", "#333");
+
+          // Update simulation
+          this.simulation.nodes(data.nodes).on("tick", this.ticked.bind(this));
+          this.simulation.force("link").links(data.links);
+
+      } catch (error) {
+          console.error("Error initializing network visualization:", error);
+          document.getElementById(this.containerId).innerHTML = 
+              `<div class="alert alert-danger">Error initializing network visualization: ${error.message}</div>`;
+      }
+  }
+
+  /**
+   * Handle simulation tick events
+   */
+  ticked() {
+      this.linkElements
+          .attr("x1", d => d.source.x)
+          .attr("y1", d => d.source.y)
+          .attr("x2", d => d.target.x)
+          .attr("y2", d => d.target.y);
+
+      this.nodeElements
+          .attr("cx", d => d.x)
+          .attr("cy", d => d.y);
+
+      this.textElements
+          .attr("x", d => d.x)
+          .attr("y", d => d.y);
+  }
+
+  /**
+   * Handle drag start
+   * @param {Event} event - D3 drag event
+   */
+  dragStarted(event, d) {
+      if (!event.active) this.simulation.alphaTarget(0.3).restart();
+      d.fx = d.x;
+      d.fy = d.y;
+  }
+
+  /**
+   * Handle drag
+   * @param {Event} event - D3 drag event
+   */
+  dragged(event, d) {
+      d.fx = event.x;
+      d.fy = event.y;
+  }
+
+  /**
+   * Handle drag end
+   * @param {Event} event - D3 drag event
+   */
+  dragEnded(event, d) {
+      if (!event.active) this.simulation.alphaTarget(0);
+      d.fx = null;
+      d.fy = null;
+  }
+
+  /**
+   * Get color based on node type
+   * @param {string} type - Node type
+   * @returns {string} - Color code
+   */
+  getNodeColor(type) {
+      const colorMap = {
+          'host': '#4CAF50',     // Green
+          'domain': '#2196F3',   // Blue
+          'subdomain': '#03A9F4', // Light Blue
+          'service': '#FF9800',  // Orange
+          'port': '#9C27B0',     // Purple
+          'vulnerability': '#F44336', // Red
+          'gateway': '#795548'   // Brown
       };
-    });
+      return colorMap[type] || '#777777';
+  }
 
-    return nodes;
-  };
-
-  const getNodeSize = (type) => {
-    const sizes = {
-      'host': 100,
-      'subdomain': 80,
-      'service': 60,
-      'gateway': 40
-    };
-    return sizes[type] || 60;
-  };
-
-  const getNodeColor = (type) => {
-    const colors = {
-      'host': '#ff4444',
-      'subdomain': '#44ff44',
-      'service': '#4444ff',
-      'gateway': '#ffff44'
-    };
-    return colors[type] || '#999999';
-  };
-
-  const CustomTooltip = ({ active, payload }) => {
-    if (active && payload && payload.length) {
-      const data = payload[0].payload;
-      return (
-        <div className="bg-white p-4 border rounded shadow">
-          <p className="font-bold">{data.name}</p>
-          <p className="text-sm">Type: {data.type}</p>
-        </div>
-      );
-    }
-    return null;
-  };
-
-  return (
-    <Card className="w-full">
-      <CardHeader>
-        <CardTitle>Network Topology Visualization</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="w-full h-96">
-          <ScatterChart
-            width={800}
-            height={400}
-            margin={{
-              top: 20,
-              right: 20,
-              bottom: 20,
-              left: 20,
-            }}
-          >
-            <CartesianGrid />
-            <XAxis type="number" dataKey="x" domain={[0, 400]} hide />
-            <YAxis type="number" dataKey="y" domain={[0, 400]} hide />
-            <ZAxis type="number" dataKey="size" range={[100, 1000]} />
-            <Tooltip content={<CustomTooltip />} />
-            <Legend />
-            <Scatter
-              name="Nodes"
-              data={processedData}
-              fill="#8884d8"
-              shape="circle"
-            />
-          </ScatterChart>
-        </div>
-        
-        {/* Node Types Legend */}
-        <div className="mt-4 flex gap-4 justify-center">
-          {['host', 'subdomain', 'service', 'gateway'].map(type => (
-            <div key={type} className="flex items-center">
-              <div 
-                className="w-4 h-4 rounded-full mr-2"
-                style={{ backgroundColor: getNodeColor(type) }}
-              />
-              <span className="capitalize">{type}</span>
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
-  );
-};
-
-export default NetworkTopologyVisualization;
+  /**
+   * Get label text based on node data
+   * @param {Object} node - Node data
+   * @returns {string} - Label text
+   */
+  getNodeLabel(node) {
+      if (node.type === 'port') {
+          return `Port ${node.id.split('-').pop()}`;
+      } else if (node.type === 'service') {
+          return node.name || node.id;
+      } else {
+          // For domains, hosts, etc.
+          const parts = node.id.split('.');
+          return parts.length > 2 ? parts[0] : node.name || node.id;
+      }
+  }
+}

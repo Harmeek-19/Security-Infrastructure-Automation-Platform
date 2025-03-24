@@ -108,6 +108,9 @@ class PortScanner:
                 'error': str(e)
             }
     
+# File: reconnaissance/scanner.py
+# Modify the _process_nmap_results method to ensure consistent state reporting
+
     def _process_nmap_results(self, scan_result, scan_type):
         """Process nmap scan results into our standard format"""
         scan_results = []
@@ -125,13 +128,22 @@ class PortScanner:
                 'ports': []
             }
             
+            # Flag to check if we found any open ports
+            found_open_ports = False
+            
             for proto in self.scanner[host].all_protocols():
                 ports = self.scanner[host][proto].keys()
                 for port in ports:
                     port_info = self.scanner[host][proto][port]
+                    # Normalize state to 'open', 'closed', or 'filtered'
+                    port_state = port_info['state']
+                    
+                    if port_state == 'open':
+                        found_open_ports = True
+                        
                     port_data = {
                         'port': port,
-                        'state': port_info['state'],
+                        'state': port_state,
                         'service': port_info.get('name', ''),
                         'version': port_info.get('version', ''),
                         'product': port_info.get('product', ''),
@@ -140,6 +152,9 @@ class PortScanner:
                         'cpe': port_info.get('cpe', '')
                     }
                     host_data['ports'].append(port_data)
+            
+            # Add a flag to indicate if any open ports were found
+            host_data['has_open_ports'] = found_open_ports
             
             # Only try to include OS data if it exists
             if 'osmatch' in self.scanner[host]:
@@ -150,7 +165,8 @@ class PortScanner:
         return {
             'status': 'success',
             'scan_info': scan_info,
-            'results': scan_results
+            'results': scan_results,
+            'open_ports_found': any(host.get('has_open_ports', False) for host in scan_results)
         }
     
     def _extract_open_ports_from_nmap(self, scan_result) -> List[int]:
