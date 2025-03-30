@@ -22,6 +22,8 @@ class PortScanner:
         self.is_root = os.geteuid() == 0 if hasattr(os, 'geteuid') else False
         # Set default timeout
         self.default_timeout = 300  # 5 minutes default
+        # Logger for class instance
+        self.logger = logging.getLogger(__name__)
         
     def get_scan_config(self, scan_type: str) -> Dict[str, str]:
         # Base configurations without OS detection
@@ -108,9 +110,6 @@ class PortScanner:
                 'error': str(e)
             }
     
-# File: reconnaissance/scanner.py
-# Modify the _process_nmap_results method to ensure consistent state reporting
-
     def _process_nmap_results(self, scan_result, scan_type):
         """Process nmap scan results into our standard format"""
         scan_results = []
@@ -121,6 +120,8 @@ class PortScanner:
             'total_hosts': len(self.scanner.all_hosts())
         }
         
+        vulnerabilities = []  # Create a list to store detected vulnerabilities
+        
         for host in self.scanner.all_hosts():
             host_data = {
                 'host': host,
@@ -130,6 +131,7 @@ class PortScanner:
             
             # Flag to check if we found any open ports
             found_open_ports = False
+            open_ports = []  # List to track open ports for vulnerability detection
             
             for proto in self.scanner[host].all_protocols():
                 ports = self.scanner[host][proto].keys()
@@ -140,7 +142,8 @@ class PortScanner:
                     
                     if port_state == 'open':
                         found_open_ports = True
-                        
+                        open_ports.append(int(port))  # Add to open ports list
+                            
                     port_data = {
                         'port': port,
                         'state': port_state,
@@ -156,17 +159,79 @@ class PortScanner:
             # Add a flag to indicate if any open ports were found
             host_data['has_open_ports'] = found_open_ports
             
+            # Process risky open ports and create vulnerabilities
+            if open_ports:
+                RISKY_PORTS = {
+                    80: {'name': 'HTTP Server', 'severity': 'LOW'},
+                    443: {'name': 'HTTPS Server', 'severity': 'LOW'},
+                    21: {'name': 'FTP Server', 'severity': 'HIGH'},
+                    22: {'name': 'SSH Server', 'severity': 'LOW'},
+                    23: {'name': 'Telnet Server', 'severity': 'HIGH'},
+                    25: {'name': 'SMTP Server', 'severity': 'MEDIUM'},
+                    53: {'name': 'DNS Server', 'severity': 'LOW'},
+                    3306: {'name': 'MySQL Database', 'severity': 'MEDIUM'},
+                    5432: {'name': 'PostgreSQL Database', 'severity': 'MEDIUM'},
+                    8080: {'name': 'HTTP Alternate Port', 'severity': 'MEDIUM'}
+                }
+                
+                for port in open_ports:
+                    if port in RISKY_PORTS:
+                        port_info = RISKY_PORTS[port]
+                        vuln_data = {
+                            'type': 'open_port',
+                            'name': f"Open Port {port} ({port_info['name']})",
+                            'description': f"Port {port} is open, running {port_info['name']}. This may present a security risk depending on configuration.",
+                            'severity': port_info['severity'],
+                            'evidence': f"Port {port} is open and accessible",
+                            'confidence': 'high',
+                            'cvss': 5.0,  # Default CVSS score for open port
+                            'host': host  # Add the host for database storage
+                        }
+                        
+                        # Add to vulnerabilities list
+                        vulnerabilities.append(vuln_data)
+            
             # Only try to include OS data if it exists
             if 'osmatch' in self.scanner[host]:
                 host_data['os_matches'] = self.scanner[host]['osmatch']
             
             scan_results.append(host_data)
         
+        # After scanning, save any detected port vulnerabilities to database
+        from vulnerability.models import Vulnerability
+        from django.utils import timezone
+        
+        # Get the target from the first host (assuming all hosts are for the same target)
+        if scan_results and vulnerabilities:
+            target = scan_results[0]['host']
+            
+            for vuln in vulnerabilities:
+                try:
+                    # Create vulnerability record in database
+                    Vulnerability.objects.get_or_create(
+                        target=target,
+                        name=vuln['name'],
+                        defaults={
+                            'description': vuln['description'],
+                            'severity': vuln['severity'],
+                            'vuln_type': 'open_port',
+                            'evidence': vuln['evidence'],
+                            'source': 'port_scan',
+                            'confidence': vuln['confidence'],
+                            'cvss_score': vuln['cvss'],
+                            'is_fixed': False,
+                            'discovery_date': timezone.now()
+                        }
+                    )
+                except Exception as e:
+                    logger.error(f"Error creating vulnerability for open port: {str(e)}")
+        
         return {
             'status': 'success',
             'scan_info': scan_info,
             'results': scan_results,
-            'open_ports_found': any(host.get('has_open_ports', False) for host in scan_results)
+            'open_ports_found': any(host.get('has_open_ports', False) for host in scan_results),
+            'vulnerabilities': vulnerabilities  # Include vulnerabilities in result
         }
     
     def _extract_open_ports_from_nmap(self, scan_result) -> List[int]:
@@ -199,39 +264,6 @@ class PortScanner:
         
         return open_ports
     
-    def _create_manual_result(self, target: str, open_ports: List[int]) -> Dict[str, Any]:
-        """Create scan result dictionary from manually detected open ports"""
-        ports_data = []
-        
-        for port in open_ports:
-            service_name = self._guess_service_name(port)
-            ports_data.append({
-                'port': port,
-                'state': 'open',
-                'service': service_name,
-                'version': '',
-                'product': '',
-                'extrainfo': 'Detected by manual scan',
-                'reason': 'syn-ack',
-                'cpe': ''
-            })
-        
-        return {
-            'status': 'success',
-            'scan_info': {
-                'scan_type': 'manual',
-                'command_line': 'Manual socket scan',
-                'scan_time': '0',
-                'total_hosts': 1
-            },
-            'results': [{
-                'host': target,
-                'state': 'up',
-                'ports': ports_data
-            }],
-            'manual_detected': True
-        }
-    
     def _guess_service_name(self, port: int) -> str:
         """Guess service name based on common port numbers"""
         service_map = {
@@ -259,6 +291,7 @@ class PortScanner:
             8443: 'https-alt'
         }
         return service_map.get(port, 'unknown')
+    
 
     def get_available_scan_types(self) -> Dict[str, str]:
         return {
@@ -267,3 +300,100 @@ class PortScanner:
             ScanType.COMPLETE.value: "Comprehensive scan of all ports with version detection",
             ScanType.FULL.value: "Intensive scan with all features including vulnerability detection"
         }
+        
+    # In PortScanner class in scanner.py
+    def _create_manual_result(self, target: str, open_ports: List[int]) -> Dict[str, Any]:
+        """Create scan result dictionary from manually detected open ports"""
+        ports_data = []
+        vulnerabilities = []  # Add a list for vulnerabilities
+        
+        for port in open_ports:
+            service_name = self._guess_service_name(port)
+            ports_data.append({
+                'port': port,
+                'state': 'open',
+                'service': service_name,
+                'version': '',
+                'product': '',
+                'extrainfo': 'Detected by manual scan',
+                'reason': 'syn-ack',
+                'cpe': ''
+            })
+            
+            # Create vulnerability data for open ports
+            # Define risk levels for different services
+            RISKY_PORTS = {
+                80: {'name': 'HTTP Server', 'severity': 'LOW'},
+                443: {'name': 'HTTPS Server', 'severity': 'LOW'},
+                21: {'name': 'FTP Server', 'severity': 'HIGH'},
+                22: {'name': 'SSH Server', 'severity': 'LOW'},
+                23: {'name': 'Telnet Server', 'severity': 'HIGH'},
+                25: {'name': 'SMTP Server', 'severity': 'MEDIUM'},
+                53: {'name': 'DNS Server', 'severity': 'LOW'},
+                3306: {'name': 'MySQL Database', 'severity': 'MEDIUM'},
+                5432: {'name': 'PostgreSQL Database', 'severity': 'MEDIUM'},
+                8080: {'name': 'HTTP Alternate Port', 'severity': 'MEDIUM'}
+            }
+            
+            # Add vulnerability for the detected port
+            if port in RISKY_PORTS:
+                port_info = RISKY_PORTS[port]
+                vuln_data = {
+                    'type': 'open_port',
+                    'name': f"Open Port {port} ({port_info['name']})",
+                    'description': f"Port {port} is open, running {port_info['name']}. This may present a security risk depending on configuration.",
+                    'severity': port_info['severity'],
+                    'evidence': f"Port {port} is open and accessible",
+                    'confidence': 'high',
+                    'cvss': 5.0,  # Default CVSS score for open port
+                    'host': target  # Add the host for database storage
+                }
+                vulnerabilities.append(vuln_data)
+        
+        # Add vulnerabilities to database
+        self._save_port_vulnerabilities(target, vulnerabilities)
+        
+        return {
+            'status': 'success',
+            'scan_info': {
+                'scan_type': 'manual',
+                'command_line': 'Manual socket scan',
+                'scan_time': '0',
+                'total_hosts': 1
+            },
+            'results': [{
+                'host': target,
+                'state': 'up',
+                'ports': ports_data
+            }],
+            'manual_detected': True,
+            'vulnerabilities': vulnerabilities  # Include vulnerabilities in result
+        }
+
+    def _save_port_vulnerabilities(self, target: str, vulnerabilities: List[Dict]) -> None:
+        """Save port vulnerabilities to database"""
+        from vulnerability.models import Vulnerability
+        from django.utils import timezone
+        
+        for vuln in vulnerabilities:
+            try:
+                # Create vulnerability record in database
+                Vulnerability.objects.get_or_create(
+                    target=target,
+                    name=vuln['name'],
+                    defaults={
+                        'description': vuln['description'],
+                        'severity': vuln['severity'],
+                        'vuln_type': 'open_port',
+                        'evidence': vuln['evidence'],
+                        'source': 'port_scan',
+                        'confidence': vuln['confidence'],
+                        'cvss_score': vuln['cvss'],
+                        'is_fixed': False,
+                        'discovery_date': timezone.now()
+                    }
+                )
+            except Exception as e:
+                self.logger.error(f"Error creating vulnerability for open port: {str(e)}")
+        
+    # Add to port scanning results processing

@@ -1,142 +1,170 @@
+<!-- templates/automation/email/workflow_completed.html -->
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="utf-8">
-    <title>Workflow Completed Notification</title>
+    <meta charset="UTF-8">
+    <title>Security Scan Completed</title>
     <style>
         body {
             font-family: Arial, sans-serif;
             line-height: 1.6;
-            margin: 0;
-            padding: 20px;
             color: #333;
-        }
-        .container {
-            max-width: 600px;
+            max-width: 800px;
             margin: 0 auto;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            padding: 20px;
         }
         .header {
-            background-color: #d4edda;
-            color: #155724;
-            padding: 10px;
-            border-radius: 5px;
-            margin-bottom: 20px;
+            background-color: #1a5276;
+            color: white;
+            padding: 20px;
             text-align: center;
+        }
+        .content {
+            padding: 20px;
+        }
+        .summary {
+            background-color: #f8f9fa;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        .vulnerabilities {
+            margin-bottom: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        .critical {
+            background-color: #ffdddd;
+        }
+        .high {
+            background-color: #ffffcc;
+        }
+        .medium {
+            background-color: #e6f3ff;
+        }
+        .low {
+            background-color: #eafaea;
         }
         .footer {
             margin-top: 30px;
             font-size: 12px;
-            color: #777;
+            color: #666;
             text-align: center;
-        }
-        .summary {
-            background-color: #f9f9f9;
-            padding: 15px;
-            border-radius: 5px;
-            margin-bottom: 20px;
-        }
-        .task-list {
-            list-style: none;
-            padding-left: 0;
-        }
-        .task-list li {
-            padding: 8px 0;
-            border-bottom: 1px solid #eee;
-        }
-        .task-list li:last-child {
-            border-bottom: none;
-        }
-        .success {
-            color: #28a745;
-        }
-        .warning {
-            color: #ffc107;
-        }
-        .danger {
-            color: #dc3545;
+            border-top: 1px solid #eee;
+            padding-top: 20px;
         }
         .button {
             display: inline-block;
-            padding: 10px 15px;
-            background-color: #007bff;
+            background-color: #1a5276;
             color: white !important;
+            padding: 10px 20px;
             text-decoration: none;
-            border-radius: 5px;
+            border-radius: 4px;
             margin: 10px 5px;
-            text-align: center;
             font-weight: bold;
+            text-align: center;
         }
-        .button-primary {
-            background-color: #28a745;
+        .button.orange {
+            background-color: #d35400;
         }
-        .button-secondary {
-            background-color: #6c757d;
-        }
-        h2, h3 {
-            color: #333;
+        .exploit-matches {
+            background-color: #fff3e0;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+            border-left: 4px solid #ff9800;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h2>Workflow Completed Successfully</h2>
-        </div>
-        
+    <div class="header">
+        <h1>Security Scan Completed</h1>
+    </div>
+    
+    <div class="content">
         <p>Hello,</p>
         
-        <p>Your security automation workflow has been completed:</p>
+        <p>The security scan for <strong>{{ workflow.target }}</strong> has been completed.</p>
         
         <div class="summary">
-            <p><strong>Workflow:</strong> {{ workflow.name }}</p>
-            <p><strong>Target:</strong> {{ workflow.target }}</p>
-            <p><strong>Started at:</strong> {{ workflow.start_time }}</p>
-            <p><strong>Completed at:</strong> {{ workflow.end_time }}</p>
-            <p><strong>Duration:</strong> {{ workflow.duration }} seconds</p>
+            <h2>Scan Summary</h2>
+            <p><strong>Start Time:</strong> {{ workflow.start_time|date:"F j, Y, g:i a" }}</p>
+            <p><strong>End Time:</strong> {{ workflow.end_time|date:"F j, Y, g:i a" }}</p>
+            <p><strong>Scan Profile:</strong> {{ workflow.scan_profile|title }}</p>
+            
+            <h3>Security Findings</h3>
+            <ul>
+                <li><strong style="color: #d9534f;">Critical Vulnerabilities:</strong> {{ summary.critical }}</li>
+                <li><strong style="color: #f0ad4e;">High Vulnerabilities:</strong> {{ summary.high }}</li>
+                <li><strong style="color: #5bc0de;">Medium Vulnerabilities:</strong> {{ summary.medium }}</li>
+                <li><strong style="color: #5cb85c;">Low Vulnerabilities:</strong> {{ summary.low }}</li>
+                <li><strong>Total Vulnerabilities:</strong> {{ summary.total }}</li>
+            </ul>
         </div>
         
-        <h3>Findings Summary:</h3>
-        <ul>
-            <li><span class="danger"><strong>Critical vulnerabilities:</strong></span> {{ summary.critical }}</li>
-            <li><span class="warning"><strong>High vulnerabilities:</strong></span> {{ summary.high }}</li>
-            <li><span class="warning"><strong>Medium vulnerabilities:</strong></span> {{ summary.medium }}</li>
-            <li><strong>Low vulnerabilities:</strong> {{ summary.low }}</li>
-            <li><strong>Total findings:</strong> {{ summary.total }}</li>
-        </ul>
+        <!-- Exploit Matches Section -->
+        {% if exploit_matches and exploit_matches.total_matches > 0 %}
+        <div class="exploit-matches">
+            <h2>Exploit Matching Results</h2>
+            <p>We found <strong>{{ exploit_matches.total_matches }}</strong> potential exploits matching <strong>{{ exploit_matches.vulnerabilities_with_matches }}</strong> vulnerabilities in your system.</p>
+            
+            {% if exploit_matches.top_matches %}
+            <h3>Top Exploits Matched:</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Vulnerability</th>
+                        <th>Exploit Title</th>
+                        <th>Confidence</th>
+                        <th>CVE ID</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for match in exploit_matches.top_matches %}
+                    <tr>
+                        <td>{{ match.vulnerability_name }}</td>
+                        <td>{{ match.exploit_title }}</td>
+                        <td>{{ match.confidence|floatformat:2 }}</td>
+                        <td>{{ match.cve_id|default:"None" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <p><strong>Note:</strong> These exploits represent potential security risks. Please review and address these vulnerabilities as a priority.</p>
+            {% endif %}
+        </div>
+        {% endif %}
         
-        <h3>Tasks Executed:</h3>
-        <ul class="task-list">
-            {% for task in tasks %}
-            <li>
-                <strong>{{ task.name }}</strong> - 
-                {% if task.status == 'completed' %}
-                <span class="success">Completed</span>
-                {% elif task.status == 'failed' %}
-                <span class="danger">Failed</span>
-                {% else %}
-                <span>{{ task.status }}</span>
-                {% endif %}
-            </li>
-            {% endfor %}
-        </ul>
+        <p>For a more detailed analysis of the vulnerabilities and remediation recommendations, please review the comprehensive report.</p>
         
-        <div style="text-align: center; margin-top: 30px;">
+        <div style="text-align: center; margin: 25px 0;">
             {% if comprehensive_report_url %}
-            <a href="{{ comprehensive_report_url }}" class="button button-primary">View Comprehensive Report</a>
+            <a href="{{ comprehensive_report_url }}" class="button">View Comprehensive Report</a>
             {% endif %}
             
             {% if pdf_url %}
-            <a href="{{ pdf_url }}" class="button">Download PDF Report</a>
+            <a href="{{ pdf_url }}" class="button orange">Download PDF Report</a>
             {% endif %}
         </div>
         
-        <div class="footer">
-            <p>This is an automated notification from your Security Automation Platform.</p>
-            <p>If you have any questions, please contact your system administrator.</p>
-        </div>
+        <p>Please address the identified vulnerabilities, especially those with critical and high severity, as soon as possible.</p>
+        
+        <p>Thank you for using our Security Infrastructure and Automation Platform.</p>
+    </div>
+    
+    <div class="footer">
+        <p>This is an automated message from the Security Infrastructure and Automation Platform.</p>
+        <p>© {% now "Y" %} Security Infrastructure and Automation Platform</p>
     </div>
 </body>
 </html>

@@ -15,7 +15,7 @@ class ReportGenerator:
 # File: reporting/report_generator.py
     def generate_report(self, report_type: str, target: str, output_format: str = 'json', scan_results: dict = None) -> Report:
         """
-        Generate a security report
+        Generate a security report with improved vulnerability handling
         
         Args:
             report_type: Type of report ('basic', 'detailed', 'executive')
@@ -34,6 +34,63 @@ class ReportGenerator:
         
         # Generate report content based on type
         try:
+            self.logger.info(f"Starting report generation for {target}, type: {report_type}, format: {output_format}")
+            
+            # First, ensure vulnerabilities from scan_results are saved to the database
+            if scan_results and 'vulnerabilities' in scan_results:
+                vuln_list = scan_results['vulnerabilities']
+                vuln_count = len(vuln_list)
+                self.logger.info(f"Processing {vuln_count} vulnerabilities from scan results")
+                
+                from vulnerability.models import Vulnerability
+                saved_count = 0
+                
+                # Save each vulnerability to database
+                for vuln_data in vuln_list:
+                    try:
+                        # Ensure we have basic required fields
+                        name = vuln_data.get('name', 'Unknown Vulnerability')
+                        
+                        # Normalize severity
+                        severity = vuln_data.get('severity', 'LOW')
+                        if isinstance(severity, str):
+                            severity = severity.upper()
+                        
+                        # Get vuln_type from either 'type' or 'vuln_type' field
+                        vuln_type = vuln_data.get('type', vuln_data.get('vuln_type', 'unknown'))
+                        
+                        # Create or update vulnerability in database
+                        vuln, created = Vulnerability.objects.update_or_create(
+                            target=target,
+                            name=name,
+                            defaults={
+                                'description': vuln_data.get('description', ''),
+                                'severity': severity,
+                                'vuln_type': vuln_type,
+                                'evidence': vuln_data.get('evidence', ''),
+                                'source': vuln_data.get('source', 'scan'),
+                                'confidence': vuln_data.get('confidence', 'medium'),
+                                'cvss_score': vuln_data.get('cvss_score', 0.0),
+                                'is_fixed': False
+                            }
+                        )
+                        
+                        status = "Created" if created else "Updated"
+                        self.logger.debug(f"{status} vulnerability in database: {name}")
+                        saved_count += 1
+                        
+                    except Exception as e:
+                        self.logger.error(f"Error saving vulnerability '{vuln_data.get('name', 'unknown')}': {str(e)}")
+                
+                self.logger.info(f"Saved {saved_count} vulnerabilities to database")
+                
+                # Get fresh data from database to ensure report accuracy
+                from vulnerability.models import Vulnerability
+                db_vulns = Vulnerability.objects.filter(target=target, is_fixed=False)
+                db_vuln_count = db_vulns.count()
+                self.logger.info(f"Found {db_vuln_count} vulnerabilities in database for report")
+            
+            # Generate the appropriate report type
             if report_type == 'detailed':
                 content = self.generate_detailed_report(target, scan_results)
             elif report_type == 'executive':
@@ -51,6 +108,13 @@ class ReportGenerator:
             # If output format is PDF, ensure proper formatting
             if output_format == 'pdf':
                 content = self._format_for_pdf(content)
+            
+            # Verify vulnerability data is present
+            if 'vulnerabilities' in content:
+                vuln_count = len(content['vulnerabilities'])
+                self.logger.info(f"Report contains {vuln_count} vulnerabilities")
+            else:
+                self.logger.warning("No vulnerabilities included in the report")
             
             # Properly serialize content to JSON string
             json_content = json.dumps(content, cls=DjangoJSONEncoder)
@@ -72,9 +136,10 @@ class ReportGenerator:
     
     def _update_severity_counts(self, content: dict) -> None:
         """
-        Ensure vulnerability severity counts are accurate
+        Ensure vulnerability severity counts are accurate with detailed logging
         """
         if 'vulnerabilities' not in content:
+            self.logger.warning("No 'vulnerabilities' key found in content - cannot update severity counts")
             return
         
         # Reset counters
@@ -87,41 +152,68 @@ class ReportGenerator:
         }
         
         # Count each vulnerability by severity
+        self.logger.info(f"Counting {len(content['vulnerabilities'])} vulnerabilities by severity")
+        
         for vuln in content['vulnerabilities']:
             severity = vuln.get('severity', '').lower()
+            self.logger.debug(f"Vulnerability: {vuln.get('name')}, Severity: {severity}")
+            
             if severity in severity_counts:
                 severity_counts[severity] += 1
+            else:
+                self.logger.warning(f"Unknown severity level: {severity} for vulnerability {vuln.get('name')}")
         
         # Update summary with accurate counts
         if 'summary' in content:
             for severity, count in severity_counts.items():
                 content['summary'][severity] = count
+                
+            self.logger.info(f"Updated severity counts: {severity_counts}")
+        else:
+            self.logger.warning("No 'summary' key found in content - cannot update severity counts")
         
         return
 
     def _format_for_pdf(self, content: dict) -> dict:
         """
         Format report content specifically for PDF output
+        
+        Args:
+            content: The raw report content
+            
+        Returns:
+            dict: Report content formatted for PDF output
         """
         # Create a copy to avoid modifying the original
         pdf_content = content.copy()
         
-        # Ensure proper table formatting for vulnerabilities
-        if 'vulnerabilities' in pdf_content:
-            for vuln in pdf_content['vulnerabilities']:
-                # Ensure descriptions are properly formatted
-                if 'description' in vuln:
-                    vuln['description'] = self._clean_description(vuln['description'])
-                
-                # Ensure evidence is properly formatted
-                if 'evidence' in vuln:
-                    vuln['evidence'] = self._clean_evidence(vuln['evidence'])
-        
-        # Ensure network visualization data is properly formatted
-        if 'network_data' in pdf_content:
-            pdf_content['network_data'] = self._format_network_data_for_pdf(pdf_content['network_data'])
+        # Ensure summary data is accessible at both top level and within report_data
+        # This addresses the template variable lookup issue
+        if 'summary' in pdf_content:
+            # Add a copy at the top level for direct template access
+            summary = pdf_content['summary'].copy()
+            
+            # Ensure exploit matching data is included in the report
+            if 'executive_summary' in pdf_content and 'exploit_matches' in pdf_content['executive_summary']:
+                summary['exploit_matches'] = pdf_content['executive_summary']['exploit_matches']
+            
+            # Make severity counts accessible at top level if available
+            if 'detailed_info' in pdf_content and 'vulnerability_severity' in pdf_content['detailed_info']:
+                for key, value in pdf_content['detailed_info']['vulnerability_severity'].items():
+                    summary[key] = value
         
         return pdf_content
+
+    def _calculate_risk_level_from_summary(self, summary):
+        """Calculate risk level based on summary data"""
+        if summary.get('critical', 0) > 0:
+            return 'CRITICAL'
+        elif summary.get('high', 0) > 2:
+            return 'HIGH'
+        elif summary.get('high', 0) > 0 or summary.get('open_ports_count', 0) > 5:
+            return 'MEDIUM'
+        else:
+            return 'LOW'
 
     def _format_network_data_for_pdf(self, network_data: dict) -> dict:
         """Format network visualization data for PDF output"""
@@ -176,22 +268,24 @@ class ReportGenerator:
     # Existing methods below
     
     def generate_basic_report(self, target: str, scan_results: dict = None) -> dict:
-        """Generate a basic security report"""
+        """Generate a basic security report with more robust handling of scan results"""
+        # Fetch existing data from the database
         subdomains = Subdomain.objects.filter(domain=target)
         port_scans = PortScan.objects.filter(host=target)
         vulnerabilities = Vulnerability.objects.filter(target=target, is_fixed=False)
         open_ports = self._get_open_ports(target)
 
         # Use provided scan_results if available
+        processed_vulns = []
         if scan_results and 'vulnerabilities' in scan_results:
-            # Combine DB findings with scan results if available
+            # Process incoming vulnerabilities from scan results
             vuln_count = len(scan_results['vulnerabilities'])
-            self.logger.info(f"Incorporating {vuln_count} vulnerabilities from scan results")
+            self.logger.info(f"Processing {vuln_count} vulnerabilities from scan results")
             
-            # Process each vulnerability to ensure it's in the database
+            # Save vulnerabilities to database for reporting
             for vuln_data in scan_results['vulnerabilities']:
                 try:
-                    # Create or update vulnerability in the database
+                    # Extract core vulnerability data
                     vuln_name = vuln_data.get('name', 'Unknown Vulnerability')
                     vuln_severity = vuln_data.get('severity', 'LOW')
                     
@@ -199,13 +293,14 @@ class ReportGenerator:
                     if isinstance(vuln_severity, str):
                         vuln_severity = vuln_severity.upper()
                     
-                    Vulnerability.objects.update_or_create(
+                    # Create/update vulnerability record
+                    vuln, created = Vulnerability.objects.update_or_create(
                         target=target,
                         name=vuln_name,
                         defaults={
                             'description': vuln_data.get('description', ''),
                             'severity': vuln_severity,
-                            'vuln_type': vuln_data.get('type', 'unknown'),
+                            'vuln_type': vuln_data.get('type', vuln_data.get('vuln_type', 'unknown')),
                             'evidence': vuln_data.get('evidence', ''),
                             'source': vuln_data.get('source', 'scan'),
                             'confidence': vuln_data.get('confidence', 'medium'),
@@ -213,11 +308,20 @@ class ReportGenerator:
                             'is_fixed': False
                         }
                     )
+                    
+                    # Add to processed list
+                    processed_vulns.append(vuln)
+                    self.logger.info(f"Processed vulnerability: {vuln_name} ({vuln_severity})")
+                    
                 except Exception as e:
                     self.logger.error(f"Error saving vulnerability from scan results: {str(e)}")
             
             # Refresh vulnerabilities from database to include the ones we just added
-            vulnerabilities = Vulnerability.objects.filter(target=target, is_fixed=False)
+            if processed_vulns:
+                self.logger.info(f"Successfully processed {len(processed_vulns)} vulnerabilities")
+                # Use a combination of existing and newly added vulnerabilities
+                vulnerabilities = Vulnerability.objects.filter(target=target, is_fixed=False)
+                self.logger.info(f"Total vulnerabilities in database: {vulnerabilities.count()}")
 
         # Create the report structure
         report = {
@@ -246,7 +350,7 @@ class ReportGenerator:
         return report
 
     def generate_detailed_report(self, target: str, scan_results: dict = None) -> dict:
-        """Generate a detailed security report"""
+        """Generate a detailed security report with exploit matches"""
         basic_report = self.generate_basic_report(target, scan_results)
         vulnerabilities = Vulnerability.objects.filter(target=target, is_fixed=False)
         
@@ -270,6 +374,55 @@ class ReportGenerator:
             'multiple': vulnerabilities.exclude(source__in=['internal', 'zap', 'nuclei']).count()
         }
         
+        # Add exploit matching statistics
+        exploit_matching = {}
+        try:
+            # Try to get exploit matching info from scan results first
+            if scan_results and 'exploit_matching' in scan_results:
+                exploit_matching = scan_results['exploit_matching']
+            else:
+                # Otherwise calculate it from the database
+                from exploit_manager.models import ExploitMatch
+                
+                # Get total matches
+                total_matches = ExploitMatch.objects.filter(
+                    vulnerability__target=target,
+                    vulnerability__is_fixed=False
+                ).count()
+                
+                # Get vulnerabilities with matches
+                vulns_with_matches = vulnerabilities.filter(
+                    exploit_matches__isnull=False
+                ).distinct().count()
+                
+                # Get top matches by confidence
+                top_matches = ExploitMatch.objects.filter(
+                    vulnerability__target=target,
+                    vulnerability__is_fixed=False
+                ).order_by('-confidence_score')[:5]
+                
+                match_details = []
+                for match in top_matches:
+                    match_details.append({
+                        'vulnerability_id': match.vulnerability.id,
+                        'vulnerability_name': match.vulnerability.name,
+                        'exploit_title': match.exploit.title,
+                        'exploit_id': match.exploit.exploit_id,
+                        'confidence': match.confidence_score,
+                        'source_url': match.exploit.source_url,
+                        'cve_id': match.exploit.cve_id
+                    })
+                
+                exploit_matching = {
+                    'total_vulnerabilities': vulnerabilities.count(),
+                    'vulnerabilities_with_matches': vulns_with_matches,
+                    'total_matches': total_matches,
+                    'match_details': match_details
+                }
+                
+        except Exception as e:
+            self.logger.error(f"Error getting exploit match data: {str(e)}")
+        
         detailed_info = {
             'port_analysis': {
                 'high_risk_ports': port_risks['high_risk'],
@@ -277,16 +430,19 @@ class ReportGenerator:
                 'low_risk_ports': port_risks['low_risk']
             },
             'vulnerability_severity': vulnerability_severity,
-            'vulnerability_sources': vulnerability_sources
+            'vulnerability_sources': vulnerability_sources,
+            'exploit_matching': exploit_matching
         }
         
         # Log key metrics
         self.logger.info(f"Vulnerability severity counts: {vulnerability_severity}")
+        if exploit_matching:
+            self.logger.info(f"Exploit matching: {exploit_matching.get('total_matches', 0)} matches for {exploit_matching.get('vulnerabilities_with_matches', 0)} vulnerabilities")
         
         return {**basic_report, 'detailed_info': detailed_info}
 
     def generate_executive_report(self, target: str, scan_results: dict = None) -> dict:
-        """Generate an executive summary report"""
+        """Generate an executive summary report with exploit matches"""
         basic_report = self.generate_basic_report(target, scan_results)
         vulnerabilities = Vulnerability.objects.filter(target=target, is_fixed=False)
         high_vulns = vulnerabilities.filter(severity='HIGH')
@@ -301,6 +457,39 @@ class ReportGenerator:
             'high_risk_ports': len(self._analyze_port_risks(basic_report['open_ports'])['high_risk'])
         }
         
+        # Get exploit matching information
+        exploit_data = {}
+        try:
+            # Try to get exploit matching info from scan results first
+            if scan_results and 'exploit_matching' in scan_results:
+                exploit_data = scan_results['exploit_matching']
+            else:
+                # Otherwise calculate it from the database
+                from exploit_manager.models import ExploitMatch
+                
+                # Count matches
+                total_matches = ExploitMatch.objects.filter(
+                    vulnerability__target=target,
+                    vulnerability__is_fixed=False
+                ).count()
+                
+                # Count vulnerabilities with matches
+                vulns_with_matches = vulnerabilities.filter(
+                    exploit_matches__isnull=False
+                ).distinct().count()
+                
+                exploit_data = {
+                    'total_matches': total_matches,
+                    'vulnerabilities_with_matches': vulns_with_matches
+                }
+            
+            # Add to risk metrics
+            if exploit_data:
+                risk_metrics['vulnerabilities_with_exploits'] = exploit_data.get('vulnerabilities_with_matches', 0)
+                risk_metrics['total_exploit_matches'] = exploit_data.get('total_matches', 0)
+        except Exception as e:
+            self.logger.error(f"Error getting exploit match data for executive report: {str(e)}")
+        
         # Combine critical and high vulnerabilities in findings
         top_findings = []
         for vuln in critical_vulns:
@@ -309,15 +498,49 @@ class ReportGenerator:
             for vuln in high_vulns[:5-len(top_findings)]:
                 top_findings.append(self._serialize_vulnerability(vuln))
         
+        # Get top exploit matches
+        top_exploit_matches = []
+        try:
+            if 'match_details' in exploit_data:
+                top_exploit_matches = exploit_data['match_details']
+            else:
+                # Get from database if not in scan results
+                from exploit_manager.models import ExploitMatch
+                matches = ExploitMatch.objects.filter(
+                    vulnerability__target=target,
+                    vulnerability__is_fixed=False,
+                    confidence_score__gte=0.4  # Only high confidence matches for executive report
+                ).order_by('-confidence_score')[:3]
+                
+                for match in matches:
+                    top_exploit_matches.append({
+                        'vulnerability_name': match.vulnerability.name,
+                        'exploit_title': match.exploit.title,
+                        'confidence': match.confidence_score,
+                        'cve_id': match.exploit.cve_id or "None",
+                        'source_url': match.exploit.source_url
+                    })
+        except Exception as e:
+            self.logger.error(f"Error getting top exploit matches: {str(e)}")
+        
         executive_summary = {
             'risk_level': self._calculate_risk_level(risk_metrics),
             'critical_findings': top_findings,
             'risk_metrics': risk_metrics,
-            'recommendations': self._generate_recommendations(risk_metrics, basic_report)
+            'recommendations': self._generate_recommendations(risk_metrics, basic_report),
+            'exploit_matches': top_exploit_matches
         }
+        
+        # Add extra recommendations for exploits if needed
+        if risk_metrics.get('vulnerabilities_with_exploits', 0) > 0:
+            executive_summary['recommendations'].insert(0, {
+                'title': 'Address Vulnerabilities with Known Exploits',
+                'description': f"Fix the {risk_metrics.get('vulnerabilities_with_exploits', 0)} vulnerabilities that have known public exploits as highest priority."
+            })
         
         # Log key metrics
         self.logger.info(f"Executive report metrics: Critical={critical_vulns.count()}, High={high_vulns.count()}, Total={vulnerabilities.count()}")
+        self.logger.info(f"Executive report exploit matches: {risk_metrics.get('total_exploit_matches', 0)}")
         
         return {**basic_report, 'executive_summary': executive_summary}
 
@@ -398,23 +621,64 @@ class ReportGenerator:
         
         return recommendations
     
+# File: reporting/report_generator.py
+# In the _serialize_vulnerability method, add exploit match information
+
+# File: reporting/report_generator.py
+# In the _serialize_vulnerability method, add exploit match information
+
     def _serialize_vulnerability(self, vuln):
-        """Properly serialize a vulnerability instance with improved formatting"""
+        """
+        Properly serialize a vulnerability instance with correct ID handling for exploits
         
-        # Clean up description to remove repetition
+        Args:
+            vuln: Vulnerability model instance
+            
+        Returns:
+            dict: Serialized vulnerability data with exploit details
+        """
+        # Clean up description and evidence using helper methods
         description = self._clean_description(vuln.description)
-        
-        # Clean up evidence to remove repetition
         evidence = self._clean_evidence(vuln.evidence)
         
-        return {
+        # Get exploit matches with proper ID handling for links
+        exploit_matches = []
+        try:
+            from exploit_manager.models import ExploitMatch
+            matches = ExploitMatch.objects.filter(vulnerability=vuln)
+            
+            # Log the number of matches found for debugging
+            match_count = matches.count()
+            self.logger.info(f"Found {match_count} exploit matches for vulnerability {vuln.id}")
+            
+            if match_count > 0:
+                for match in matches:
+                    exploit = match.exploit
+                    # Include both database ID and exploit_id to support proper linking
+                    exploit_data = {
+                        'id': exploit.id,  # Database ID for URL construction
+                        'exploit_id': exploit.exploit_id,  # ExploitDB ID for reference
+                        'title': exploit.title,
+                        'description': exploit.description[:100] + '...' if len(exploit.description) > 100 else exploit.description,
+                        'confidence': match.confidence_score,
+                        'status': match.status,
+                        'source_url': exploit.source_url,
+                        'cve_id': exploit.cve_id or "None"
+                    }
+                    exploit_matches.append(exploit_data)
+                    self.logger.debug(f"Added exploit match: Database ID={exploit.id}, ExploitDB ID={exploit.exploit_id}")
+        except Exception as e:
+            self.logger.error(f"Error retrieving exploit matches for vulnerability {vuln.id}: {str(e)}")
+        
+        # Build the complete vulnerability data object
+        vuln_data = {
             'id': vuln.id,
             'target': vuln.target,
             'name': vuln.name,
             'description': description,
             'severity': vuln.severity,
             'vuln_type': vuln.vuln_type,
-            'type': vuln.vuln_type,  # Add duplicate field for template compatibility
+            'type': vuln.vuln_type,  # Duplicate field for template compatibility
             'evidence': evidence,
             'discovery_date': vuln.discovery_date.isoformat(),
             'is_fixed': vuln.is_fixed,
@@ -425,9 +689,11 @@ class ReportGenerator:
             'solution': vuln.solution if vuln.solution else '',
             'references': list(vuln.references) if vuln.references else [],
             'cwe': vuln.cwe if vuln.cwe else '',
-            'metadata': dict(vuln.metadata) if vuln.metadata else {}
+            'metadata': dict(vuln.metadata) if vuln.metadata else {},
+            'exploit_matches': exploit_matches  # Include properly formatted exploit matches
         }
-
+        
+        return vuln_data
 # File: reporting/report_generator.py
 
     def _clean_description(self, description):

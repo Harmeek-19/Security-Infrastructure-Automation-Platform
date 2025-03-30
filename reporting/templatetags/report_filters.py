@@ -6,18 +6,19 @@ register = template.Library()
 
 @register.filter
 def get_item(dictionary, key):
-    """Get an item from a dictionary or list using a key or index"""
-    if dictionary is None:
-        return None
+    """
+    Get an item from a dictionary or list by index/key
+    
+    Usage: {{ dictionary|get_item:key }}
+    """
     if isinstance(dictionary, list):
         try:
-            index = int(key)
-            if 0 <= index < len(dictionary):
-                return dictionary[index]
+            return dictionary[int(key)]
+        except (IndexError, ValueError):
             return None
-        except (ValueError, IndexError):
-            return None
-    return dictionary.get(key)
+    elif isinstance(dictionary, dict):
+        return dictionary.get(key)
+    return None
 
 @register.filter
 def get_attr(obj, attr):
@@ -27,14 +28,25 @@ def get_attr(obj, attr):
     return getattr(obj, attr, None)
 
 @register.filter
-def json_pretty(value):
-    """Format JSON nicely"""
-    if isinstance(value, str):
-        try:
-            value = json.loads(value)
-        except:
-            return value
-    return json.dumps(value, indent=2)
+def json_pretty(data):
+    """
+    Format JSON data in a readable way
+    
+    Usage: {{ data|json_pretty }}
+    """
+    if not data:
+        return "No data"
+        
+    try:
+        # If it's already a string, try to load it as JSON
+        if isinstance(data, str):
+            data = json.loads(data)
+            
+        # Pretty print with indentation
+        return json.dumps(data, indent=2)
+    except:
+        # If it's not valid JSON or there's an error, return as is
+        return data
 
 @register.filter
 def to_json(value):
@@ -69,3 +81,20 @@ def status_class(status):
     elif status == "skipped":
         return "secondary"
     return "light"
+
+# reporting/templatetags/report_filters.py
+
+
+
+
+@register.filter
+def multiply(value, arg):
+    """
+    Multiply the value by the argument
+    
+    Usage: {{ value|multiply:100 }}
+    """
+    try:
+        return float(value) * float(arg)
+    except (ValueError, TypeError):
+        return 0

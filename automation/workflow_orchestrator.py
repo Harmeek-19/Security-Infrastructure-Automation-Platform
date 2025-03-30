@@ -36,6 +36,7 @@ class WorkflowOrchestrator:
         'port_scanning': 'Port Scanning',
         'service_identification': 'Service Identification',
         'vulnerability_scanning': 'Vulnerability Scanning',
+        'exploit_matching': 'Exploit Matching',  # New task type
         'network_mapping': 'Network Mapping',
         'report_generation': 'Report Generation'
     }
@@ -45,8 +46,9 @@ class WorkflowOrchestrator:
         'port_scanning': ['subdomain_enumeration'],
         'service_identification': ['port_scanning'],
         'vulnerability_scanning': ['service_identification'],
+        'exploit_matching': ['vulnerability_scanning'],  # New dependency
         'network_mapping': ['service_identification'],
-        'report_generation': ['vulnerability_scanning', 'network_mapping']
+        'report_generation': ['vulnerability_scanning', 'network_mapping', 'exploit_matching']  # Updated dependency
     }
     
     def __init__(self):
@@ -348,6 +350,8 @@ class WorkflowOrchestrator:
                 result = self._run_service_identification(task)
             elif task.task_type == 'vulnerability_scanning':
                 result = self._run_vulnerability_scanning(task)
+            elif task.task_type == 'exploit_matching':  # New task type
+                result = self._run_exploit_matching(task)
             elif task.task_type == 'network_mapping':
                 result = self._run_network_mapping(task)
             elif task.task_type == 'report_generation':
@@ -1250,9 +1254,72 @@ class WorkflowOrchestrator:
                 'connections': 0
             }
     
+    def _run_exploit_matching(self, task: ScanTask) -> dict:
+        """Run exploit matching for vulnerabilities identified in the target"""
+        # Get the original target from the task
+        original_target = task.workflow.target
+        
+        # Clean the target URL to get just the hostname
+        target_url = self.parse_target_url(original_target)
+        
+        try:
+            self.logger.info(f"Starting exploit matching for vulnerabilities in {target_url}")
+            
+            # Create a new matcher instance
+            from exploit_manager.matcher import ExploitMatcher
+            matcher = ExploitMatcher()
+            
+            # Get vulnerabilities for this target
+            from vulnerability.models import Vulnerability
+            vulnerabilities = Vulnerability.objects.filter(target=target_url, is_fixed=False)
+            
+            total_vulns = vulnerabilities.count()
+            matched_vulns = 0
+            total_matches = 0
+            match_details = []
+            
+            # Match each vulnerability with potential exploits
+            for vuln in vulnerabilities:
+                matches = matcher.match_vulnerability(vuln)
+                if matches:
+                    matched_vulns += 1
+                    total_matches += len(matches)
+                    
+                    # Add top match to details
+                    if matches:
+                        top_match = matches[0]  # Assuming matches are sorted by confidence
+                        match_details.append({
+                            'vulnerability_id': vuln.id,
+                            'vulnerability_name': vuln.name,
+                            'exploit_title': top_match.exploit.title,
+                            'exploit_id': top_match.exploit.exploit_id,
+                            'confidence': top_match.confidence_score
+                        })
+            
+            # Create result data
+            result = {
+                'status': 'success',
+                'target': original_target,
+                'total_vulnerabilities': total_vulns,
+                'vulnerabilities_with_matches': matched_vulns,
+                'total_matches': total_matches,
+                'match_details': match_details[:5]  # Include top 5 matches in the result
+            }
+            
+            self.logger.info(f"Exploit matching completed: found {total_matches} exploits for {matched_vulns} vulnerabilities")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Exploit matching failed: {str(e)}")
+            return {
+                'status': 'error',
+                'error': f"Exploit matching failed: {str(e)}"
+            }
+
+    
 # File: automation/workflow_orchestrator.py
     def _run_report_generation(self, task: ScanTask) -> dict:
-        """Run report generation task with improved URL handling"""
+        """Run report generation task with improved URL handling and exploit match data"""
         # Get the original target from the task
         original_target = task.workflow.target
         
@@ -1276,22 +1343,179 @@ class WorkflowOrchestrator:
                 status='completed'
             ).first()
             
+            # Get exploit matching task result
+            exploit_match_task = ScanTask.objects.filter(
+                workflow=task.workflow,
+                task_type='exploit_matching',
+                status='completed'
+            ).first()
+            
             # Parse scan results if available
-            scan_results = None
+            scan_results = {'workflow_id': task.workflow.id}
+            
+            # Initialize variables to track findings
+            vuln_count = 0
+            processed_vulns = []
+            
             if vuln_scan_task and vuln_scan_task.result:
                 try:
-                    scan_results = json.loads(vuln_scan_task.result)
-                except:
-                    logger.error("Failed to parse vulnerability scan results")
+                    vuln_results = json.loads(vuln_scan_task.result)
+                    
+                    # Extract the vulnerabilities directly
+                    if 'vulnerabilities' in vuln_results:
+                        vuln_list = vuln_results['vulnerabilities']
+                        vuln_count = len(vuln_list)
+                        self.logger.info(f"Found {vuln_count} vulnerabilities in scan results")
+                        
+                        # Explicitly process and save each vulnerability to ensure they're in the database
+                        from vulnerability.models import Vulnerability
+                        
+                        for vuln_data in vuln_list:
+                            try:
+                                # Normalize the target
+                                vuln_target = target_url
+                                
+                                # Extract and normalize the severity
+                                severity = vuln_data.get('severity', 'MEDIUM')
+                                if isinstance(severity, str):
+                                    severity = severity.upper()
+                                
+                                # Create or update the vulnerability in the database
+                                vuln, created = Vulnerability.objects.update_or_create(
+                                    target=vuln_target,
+                                    name=vuln_data.get('name', 'Unknown vulnerability'),
+                                    defaults={
+                                        'description': vuln_data.get('description', ''),
+                                        'severity': severity,
+                                        'vuln_type': vuln_data.get('type', vuln_data.get('vuln_type', 'unknown')),
+                                        'evidence': vuln_data.get('evidence', ''),
+                                        'source': vuln_data.get('source', 'scan'),
+                                        'confidence': vuln_data.get('confidence', 'medium'),
+                                        'cvss_score': vuln_data.get('cvss_score', 0.0),
+                                        'is_fixed': False
+                                    }
+                                )
+                                
+                                status = 'created' if created else 'updated'
+                                self.logger.info(f"Vulnerability {status} in database: {vuln.name} ({vuln.severity})")
+                                processed_vulns.append(vuln)
+                                
+                            except Exception as ve:
+                                self.logger.error(f"Error saving vulnerability: {str(ve)}")
+                    
+                    # Merge other relevant data into scan_results
+                    for key, value in vuln_results.items():
+                        if key not in ['status', 'vulnerabilities']:
+                            scan_results[key] = value
+                    
+                    self.logger.info(f"Processed vulnerability scan results for report generation")
+                except Exception as parse_error:
+                    self.logger.error(f"Failed to parse vulnerability scan results: {str(parse_error)}")
             
-            # Add workflow ID to the scan results
-            if scan_results is None:
-                scan_results = {}
-            scan_results['workflow_id'] = task.workflow.id
+            # Parse exploit matching results if available
+            if exploit_match_task and exploit_match_task.result:
+                try:
+                    exploit_results = json.loads(exploit_match_task.result)
+                    if exploit_results.get('status') == 'success':
+                        # Add exploit matching data to scan results
+                        scan_results['exploit_matching'] = {
+                            'total_vulnerabilities': exploit_results.get('total_vulnerabilities', 0),
+                            'vulnerabilities_with_matches': exploit_results.get('vulnerabilities_with_matches', 0),
+                            'total_matches': exploit_results.get('total_matches', 0),
+                            'match_details': exploit_results.get('match_details', [])
+                        }
+                        self.logger.info(f"Added exploit matching data to report: {exploit_results.get('total_matches', 0)} matches")
+                    else:
+                        self.logger.warning(f"Exploit matching task didn't complete successfully: {exploit_results.get('error', 'Unknown error')}")
+                except Exception as parse_error:
+                    self.logger.error(f"Failed to parse exploit matching results: {str(parse_error)}")
+            else:
+                self.logger.warning("No completed exploit matching task found for report generation")
+                
+                # If no exploit match task, try to get data from database directly
+                try:
+                    from exploit_manager.models import ExploitMatch
+                    from vulnerability.models import Vulnerability
+                    
+                    vulnerabilities = Vulnerability.objects.filter(target=target_url, is_fixed=False)
+                    
+                    # Count total matches
+                    total_matches = ExploitMatch.objects.filter(
+                        vulnerability__target=target_url,
+                        vulnerability__is_fixed=False
+                    ).count()
+                    
+                    # Get vulnerabilities with matches
+                    vulns_with_matches = vulnerabilities.filter(
+                        exploit_matches__isnull=False
+                    ).distinct().count()
+                    
+                    # Get top matches by confidence
+                    top_matches = ExploitMatch.objects.filter(
+                        vulnerability__target=target_url,
+                        vulnerability__is_fixed=False
+                    ).order_by('-confidence_score')[:5]
+                    
+                    match_details = []
+                    for match in top_matches:
+                        match_details.append({
+                            'vulnerability_id': match.vulnerability.id,
+                            'vulnerability_name': match.vulnerability.name,
+                            'exploit_title': match.exploit.title,
+                            'exploit_id': match.exploit.exploit_id,
+                            'id': match.exploit.id,  # Add database ID for URL construction
+                            'confidence': match.confidence_score,
+                            'cve_id': match.exploit.cve_id or "None"
+                        })
+                    
+                    # Add to scan results
+                    scan_results['exploit_matching'] = {
+                        'total_vulnerabilities': vulnerabilities.count(),
+                        'vulnerabilities_with_matches': vulns_with_matches,
+                        'total_matches': total_matches,
+                        'match_details': match_details
+                    }
+                    
+                    self.logger.info(f"Added exploit match data from database: {total_matches} matches")
+                except Exception as db_error:
+                    self.logger.error(f"Failed to get exploit matches from database: {str(db_error)}")
             
-            # Use original target for report generation
-            logger.info(f"Generating {report_type} report for {original_target}")
+            # Double-check the vulnerability counts in the database
+            from vulnerability.models import Vulnerability
+            db_vulns = Vulnerability.objects.filter(target=target_url, is_fixed=False)
+            db_vuln_count = db_vulns.count()
+            
+            self.logger.info(f"Vulnerabilities in database for {target_url}: {db_vuln_count}")
+            
+            # If we don't have vulnerability data in scan_results yet, add it from the database
+            if 'vulnerabilities' not in scan_results or not scan_results['vulnerabilities']:
+                scan_results['vulnerabilities'] = []
+                for vuln in db_vulns:
+                    scan_results['vulnerabilities'].append({
+                        'id': vuln.id,
+                        'name': vuln.name,
+                        'description': vuln.description,
+                        'severity': vuln.severity,
+                        'type': vuln.vuln_type,
+                        'evidence': vuln.evidence,
+                        'source': vuln.source,
+                        'confidence': vuln.confidence,
+                        'cvss_score': vuln.cvss_score,
+                    })
+            
+            # Generate different report formats
+            self.logger.info(f"Generating {report_type} report for {original_target} with {db_vuln_count} vulnerabilities")
+            
+            # Generate HTML report
             report_html = self.report_generator.generate_report(report_type, original_target, 'html', scan_results)
+            
+            # Generate PDF report as well
+            try:
+                report_pdf = self.report_generator.generate_report(report_type, original_target, 'pdf', scan_results)
+                pdf_id = report_pdf.id
+            except Exception as pdf_error:
+                self.logger.error(f"Error generating PDF report: {str(pdf_error)}")
+                pdf_id = None
             
             # Only send a single notification email
             if task.workflow.notification_email:
@@ -1303,15 +1527,17 @@ class WorkflowOrchestrator:
             return {
                 'status': 'success',
                 'target': original_target,
-                'workflow_id': task.workflow.id,  # Include workflow ID in the result
+                'workflow_id': task.workflow.id,
                 'report_types': [report_type],
-                'report_formats': ['html'],
+                'report_formats': ['html', 'pdf'] if pdf_id else ['html'],
                 'report_ids': {
-                    'html': report_html.id
-                }
+                    'html': report_html.id,
+                    'pdf': pdf_id
+                },
+                'vulnerability_count': db_vuln_count  # Include the count for verification
             }
         except Exception as e:
-            logger.error(f"Report generation failed: {str(e)}")
+            self.logger.error(f"Report generation failed: {str(e)}")
             return {
                 'status': 'error',
                 'error': f"Report generation failed: {str(e)}"

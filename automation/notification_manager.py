@@ -22,6 +22,7 @@ class NotificationManager:
     
     def __init__(self):
         self.app_base_url = getattr(settings, 'APP_BASE_URL', 'http://localhost:8000')
+        self.logger = logging.getLogger(__name__)  # Initialize the logger as an instance attribute
     
     def send_workflow_completion_notification(self, workflow: ScanWorkflow, report_id: int = None) -> None:
         """
@@ -47,16 +48,61 @@ class NotificationManager:
             # Get tasks for this workflow
             tasks = workflow.tasks.all().order_by('order')
             
-            # Get vulnerability counts
-            from vulnerability.models import Vulnerability
-            vulns = Vulnerability.objects.filter(target=workflow.target, is_fixed=False)
+            # Try to get vulnerability counts from the most recent scan results first
             summary = {
-                'critical': vulns.filter(severity='CRITICAL').count(),
-                'high': vulns.filter(severity='HIGH').count(),
-                'medium': vulns.filter(severity='MEDIUM').count(),
-                'low': vulns.filter(severity='LOW').count(),
-                'total': vulns.count()
+                'critical': 0,
+                'high': 0,
+                'medium': 0,
+                'low': 0,
+                'total': 0
             }
+            
+            # Find the vulnerability scanning task
+            vuln_scan_task = tasks.filter(task_type='vulnerability_scanning', status='completed').first()
+            
+            if vuln_scan_task and vuln_scan_task.result:
+                try:
+                    # Parse the task result
+                    import json
+                    result_data = json.loads(vuln_scan_task.result)
+                    
+                    # Extract summary data if available
+                    if 'summary' in result_data:
+                        summary = {
+                            'critical': result_data['summary'].get('critical', 0),
+                            'high': result_data['summary'].get('high', 0),
+                            'medium': result_data['summary'].get('medium', 0),
+                            'low': result_data['summary'].get('low', 0),
+                            'total': result_data['summary'].get('total', 0)
+                        }
+                        logger.info(f"Using vulnerability counts from scan results: {summary}")
+                    else:
+                        # Count vulnerabilities from the result data
+                        vulns = result_data.get('vulnerabilities', [])
+                        summary = {
+                            'critical': len([v for v in vulns if v.get('severity') == 'CRITICAL']),
+                            'high': len([v for v in vulns if v.get('severity') == 'HIGH']),
+                            'medium': len([v for v in vulns if v.get('severity') == 'MEDIUM']),
+                            'low': len([v for v in vulns if v.get('severity') == 'LOW']),
+                            'total': len(vulns)
+                        }
+                        logger.info(f"Calculated vulnerability counts from results: {summary}")
+                except Exception as e:
+                    logger.error(f"Error parsing vulnerability scan results: {str(e)}")
+                    # Fall back to database counts
+                    
+            # If no data from scan results, get from database
+            if summary['total'] == 0:
+                from vulnerability.models import Vulnerability
+                vulns = Vulnerability.objects.filter(target=workflow.target, is_fixed=False)
+                summary = {
+                    'critical': vulns.filter(severity='CRITICAL').count(),
+                    'high': vulns.filter(severity='HIGH').count(),
+                    'medium': vulns.filter(severity='MEDIUM').count(),
+                    'low': vulns.filter(severity='LOW').count(),
+                    'total': vulns.count()
+                }
+                logger.info(f"Using vulnerability counts from database: {summary}")
             
             # Send email
             self._send_email_notification(notification, {
@@ -103,10 +149,10 @@ class NotificationManager:
                 'dashboard_url': f"{self.app_base_url}/automation/dashboard/"
             })
             
-            logger.info(f"Sent workflow failure notification for workflow {workflow.id}")
+            self.logger.info(f"Sent workflow failure notification for workflow {workflow.id}")
             
         except Exception as e:
-            logger.error(f"Error sending workflow failure notification: {str(e)}")
+            self.logger.error(f"Error sending workflow failure notification: {str(e)}")
     
     def send_workflow_cancellation_notification(self, workflow: ScanWorkflow) -> None:
         """
@@ -136,10 +182,10 @@ class NotificationManager:
                 'dashboard_url': f"{self.app_base_url}/automation/dashboard/"
             })
             
-            logger.info(f"Sent workflow cancellation notification for workflow {workflow.id}")
+            self.logger.info(f"Sent workflow cancellation notification for workflow {workflow.id}")
             
         except Exception as e:
-            logger.error(f"Error sending workflow cancellation notification: {str(e)}")
+            self.logger.error(f"Error sending workflow cancellation notification: {str(e)}")
     
     def send_task_failure_notification(self, task: ScanTask, error: str) -> None:
         """
@@ -173,10 +219,10 @@ class NotificationManager:
                 'dashboard_url': f"{self.app_base_url}/automation/dashboard/"
             })
             
-            logger.info(f"Sent task failure notification for task {task.id}")
+            self.logger.info(f"Sent task failure notification for task {task.id}")
             
         except Exception as e:
-            logger.error(f"Error sending task failure notification: {str(e)}")
+            self.logger.error(f"Error sending task failure notification: {str(e)}")
     
     def send_critical_vulnerability_notification(self, workflow: ScanWorkflow, critical_count: int, high_count: int) -> None:
         """
@@ -216,10 +262,10 @@ class NotificationManager:
                 'dashboard_url': f"{self.app_base_url}/automation/dashboard/"
             })
             
-            logger.info(f"Sent critical vulnerability notification for workflow {workflow.id}")
+            self.logger.info(f"Sent critical vulnerability notification for workflow {workflow.id}")
             
         except Exception as e:
-            logger.error(f"Error sending critical vulnerability notification: {str(e)}")
+            self.logger.error(f"Error sending critical vulnerability notification: {str(e)}")
     
     def send_report_ready_notification(self, workflow: ScanWorkflow, html_report_id: int, pdf_report_id: int) -> None:
         """
@@ -257,10 +303,10 @@ class NotificationManager:
                 'dashboard_url': f"{self.app_base_url}/automation/dashboard/"
             })
             
-            logger.info(f"Sent report ready notification for workflow {workflow.id}")
+            self.logger.info(f"Sent report ready notification for workflow {workflow.id}")
             
         except Exception as e:
-            logger.error(f"Error sending report ready notification: {str(e)}")
+            self.logger.error(f"Error sending report ready notification: {str(e)}")
     
     def _send_email_notification(self, notification: Notification, context: dict) -> bool:
         """
@@ -291,7 +337,7 @@ class NotificationManager:
                     fail_silently=False
                 )
             except Exception as smtp_error:
-                logger.error(f"SMTP error: {str(smtp_error)}")
+                self.logger.error(f"SMTP error: {str(smtp_error)}")
                 
                 # Fall back to console backend in debug mode
                 if hasattr(settings, 'EMAIL_BACKEND_FALLBACK') and settings.DEBUG:
@@ -307,7 +353,7 @@ class NotificationManager:
                     )
                     email.attach_alternative(email_html, "text/html")
                     backend.send_messages([email])
-                    logger.info(f"Email sent using fallback console backend")
+                    self.logger.info(f"Email sent using fallback console backend")
                 else:
                     raise  # Re-raise the original error
             
@@ -319,6 +365,6 @@ class NotificationManager:
             return True
             
         except Exception as e:
-            logger.error(f"Error sending email notification: {template_name}")
-            logger.error(f"Error details: {str(e)}")
+            self.logger.error(f"Error sending email notification: {template_name}")
+            self.logger.error(f"Error details: {str(e)}")
             return False

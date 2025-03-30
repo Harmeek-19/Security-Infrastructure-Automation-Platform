@@ -39,9 +39,11 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'network_visualization',
     'automation',
+    'exploit_manager', 
     'reconnaissance.apps.ReconnaissanceConfig',
     'vulnerability.apps.VulnerabilityConfig',
     'reporting.apps.ReportingConfig',
+    'manual_exploitation.apps.ManualExploitationConfig', 
     
 ]
 
