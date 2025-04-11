@@ -1,44 +1,79 @@
-# Virtual environment
-venv/
-env/
-
-# Python bytecode and cache
+# Python and Django specific
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+.env
+.venv
+venv/
+ENV/
 
-# Django migrations cache
-**/migrations/__pycache__/
-**/migrations/*.pyc
-
-# Logs and debug output
-logs/
+# Django
 *.log
-debug_logs/
-d_log.txt
-
-# Database files
 db.sqlite3
+db.sqlite3-journal
+media/
+static/
+*.pot
+*.mo
+migrations/0*.py
+!migrations/__init__.py
 
-# Output and results files
-all_code_output.txt
-results.txt
-test_output.json
+# Local configuration
+local_settings.py
+settings_local.py
 
-# Docker and shell scripts
-
-get-docker.sh
-run_django.sh
-
-# Nuclei scan results and security scans
-vulnerability/debug_logs/
-vulnerability/nuclei-results/
-
-# IDE and system files
+# Editor and IDE files
+.idea/
+.vscode/
 *.swp
 *.swo
-.vscode/
-.idea/
 .DS_Store
+*.sublime-workspace
+*.sublime-project
 
-# Other temp files
-touch
+# Security-specific content to exclude
+zap/
+nuclei-results/
+nuclei-templates/
+debug_logs/
+
+# Sensitive information
+*.pem
+*.key
+*.crt
+*.pub
+*.env
+secrets.json
+credentials.json
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*.pid
+temp/
+tmp/
+
+# Docker
+.dockerignore
+docker-compose.override.yml
+
+# Project specific files to ignore
+logs/*.log

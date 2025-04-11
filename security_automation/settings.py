@@ -43,8 +43,8 @@ INSTALLED_APPS = [
     'reconnaissance.apps.ReconnaissanceConfig',
     'vulnerability.apps.VulnerabilityConfig',
     'reporting.apps.ReportingConfig',
-    'manual_exploitation.apps.ManualExploitationConfig', 
-    
+    'manual_exploitation.apps.ManualExploitationConfig',
+  
 ]
 
 # Update DATABASES in settings.py
@@ -223,12 +223,14 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'manual_exploitation.context_processors.dict_access_functions',
             ],
         },
     },
 ]
 
-WSGI_APPLICATION = 'security_automation.wsgi.application'
+# Add to settings.py
+
 
 
 # Database

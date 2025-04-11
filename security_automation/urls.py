@@ -10,5 +10,6 @@ urlpatterns = [
     path('network/', include('network_visualization.urls')),
     path('automation/', include('automation.urls')),
     path('exploits/', include('exploit_manager.urls')),
-    path('exploitation/', include('manual_exploitation.urls')),# Add this line
+    path('exploitation/', include('manual_exploitation.urls')),
+# Add this line
 ]
